@@ -1,0 +1,167 @@
+{
+  "level": "hard",
+  "games": 2000,
+  "msPerGame": 14.1,
+  "attempts": {
+    "min": 0,
+    "p5": 0,
+    "p50": 0,
+    "p95": 1,
+    "max": 4,
+    "mean": 0.1
+  },
+  "retryReasons": {
+    "doors-break-route": 64,
+    "no-portal-spot": 39,
+    "route-long": 66,
+    "few-checkpoints": 21,
+    "key-unreachable": 15,
+    "route-short": 2
+  },
+  "algorithms": {
+    "mixed": 704,
+    "backtracker": 599,
+    "prim": 697
+  },
+  "themes": {
+    "forest": 497,
+    "cave": 513,
+    "ice": 486,
+    "desert": 504
+  },
+  "obstacleTypes": {
+    "pits": 2000,
+    "ice": 1732,
+    "swirls": 1756,
+    "doors": 1770,
+    "portals": 1748
+  },
+  "plainPath": {
+    "min": 24,
+    "p5": 46,
+    "p50": 72,
+    "p95": 150,
+    "max": 282,
+    "mean": 80.9
+  },
+  "solutionMoves": {
+    "min": 38,
+    "p5": 51,
+    "p50": 98,
+    "p95": 205,
+    "max": 264,
+    "mean": 109.2
+  },
+  "routeDecisions": {
+    "min": 7,
+    "p5": 18,
+    "p50": 31,
+    "p95": 49,
+    "max": 74,
+    "mean": 31.8
+  },
+  "effort": {
+    "min": 90,
+    "p5": 104,
+    "p50": 160,
+    "p95": 286,
+    "max": 340,
+    "mean": 172.8
+  },
+  "deadEnds": {
+    "min": 30,
+    "p5": 39,
+    "p50": 66,
+    "p95": 132,
+    "max": 160,
+    "mean": 76
+  },
+  "junctions": {
+    "min": 72,
+    "p5": 100,
+    "p50": 154,
+    "p95": 237,
+    "max": 256,
+    "mean": 165.2
+  },
+  "loops": {
+    "min": 12,
+    "p5": 31,
+    "p50": 56,
+    "p95": 96,
+    "max": 114,
+    "mean": 60.2
+  },
+  "pits": {
+    "min": 16,
+    "p5": 16,
+    "p50": 19,
+    "p95": 22,
+    "max": 22,
+    "mean": 19
+  },
+  "doors": {
+    "min": 0,
+    "p5": 0,
+    "p50": 2,
+    "p95": 3,
+    "max": 3,
+    "mean": 2.2
+  },
+  "portalPairs": {
+    "min": 0,
+    "p5": 0,
+    "p50": 2,
+    "p95": 3,
+    "max": 3,
+    "mean": 2.2
+  },
+  "ponds": {
+    "min": 0,
+    "p5": 0,
+    "p50": 2,
+    "p95": 3,
+    "max": 3,
+    "mean": 2.2
+  },
+  "iceCells": {
+    "min": 0,
+    "p5": 0,
+    "p50": 28,
+    "p95": 41,
+    "max": 48,
+    "mean": 26.6
+  },
+  "swirls": {
+    "min": 0,
+    "p5": 0,
+    "p50": 3,
+    "p95": 4,
+    "max": 4,
+    "mean": 3.1
+  },
+  "lanterns": {
+    "min": 1,
+    "p5": 3,
+    "p50": 3,
+    "p95": 3,
+    "max": 3,
+    "mean": 3
+  },
+  "landmarks": {
+    "min": 16,
+    "p5": 16,
+    "p50": 16,
+    "p95": 16,
+    "max": 16,
+    "mean": 16
+  },
+  "statesExplored": {
+    "min": 456,
+    "p5": 593,
+    "p50": 2320,
+    "p95": 4904,
+    "max": 5180,
+    "mean": 2418.7
+  }
+}
