@@ -55,7 +55,7 @@ Para probar con dos dispositivos en la misma red Wi-Fi: `npm run dev -- -H 0.0.0
 Otros comandos:
 
 ```bash
-npm test                 # unos 6–8 min: motor, 6.000 laberintos, 5.000 pruebas por tipo (anti-memorización), la Sombra, uso prolongado, textos, flujos de dos dispositivos
+npm test                 # unos 6 min: motor, 6.000 laberintos, 5.000 pruebas por tipo (anti-memorización), la Sombra, uso prolongado, textos, flujos de dos dispositivos
 npm run typecheck
 npm run build            # export estático en out/
 npm start                # sirve out/ como lo haría el hosting

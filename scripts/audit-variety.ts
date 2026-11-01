@@ -364,7 +364,7 @@ lines.push(
   "## Qué NO cubre esta auditoría",
   "",
   "- Parejas reales: no se puede medir aburrimiento. `PLAYTEST.md` tiene las preguntas de rejugabilidad.",
-  "- Los textos (frases por evento): se auditan aparte con `src/engine/__tests__/` y `lib/__tests__/lines.test.ts` (ver README).",
+  "- Los textos (frases por evento): se auditan aparte con `components/game/__tests__/variety.test.ts` y `lib/__tests__/lines.test.ts`.",
   "- Las 8 familias de siluetas y las 5 maldiciones son vocabulario fijo de mecánica a propósito: son la interfaz, no la respuesta.",
   "",
 );

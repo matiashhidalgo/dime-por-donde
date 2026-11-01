@@ -7,9 +7,10 @@
   --background: #f7f1e8;
   --foreground: #2b2730;
   --muted: #6f6776;
-  --accent: #d9634c;
+  /* Darkened a notch from #d9634c / #2a8a80 so white text on the accent and accent text on the cards pass WCAG AA (4.5:1). */
+  --accent: #c4503a;
   --accent-ink: #ffffff;
-  --accent-2: #2a8a80;
+  --accent-2: #217a71;
   --card: #fffaf2;
   --border: #e6dac8;
   --glow-a: rgba(246, 165, 122, 0.35);

@@ -163,6 +163,18 @@ describe("La Sombra: ticks and touches", () => {
     expect(waitPlay(none, createPlay(none)).outcome).toBe("blocked");
   });
 
+  it("waiting never mutates the previous state (states are values)", () => {
+    const g = game();
+    const s0 = createPlay(g);
+    const memo = s0.memo.slice();
+    const bodies = JSON.stringify(s0.shadow);
+    const r = waitPlay(g, s0);
+    expect(Array.from(s0.memo)).toEqual(Array.from(memo));
+    expect(JSON.stringify(s0.shadow)).toBe(bodies);
+    expect(r.state.memo).not.toBe(s0.memo);
+    expect(s0.ticks).toBe(0);
+  });
+
   it("the body walks away after a touch and goes back to its route", () => {
     const g = game();
     let s = createPlay(g);

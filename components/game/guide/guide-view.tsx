@@ -380,7 +380,7 @@ export function GuideView({
   ];
 
   return (
-    <div className="fixed inset-0 flex flex-col bg-background">
+    <main className="fixed inset-0 flex flex-col bg-background">
       {/* HUD */}
       <header className="flex items-center gap-2 border-b border-border bg-card/90 px-2 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] backdrop-blur sm:px-4">
         <button onClick={onQuit} aria-label="Salir de la partida" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-border/50">
@@ -393,6 +393,7 @@ export function GuideView({
         <button
           onClick={() => setLegendOpen((o) => !o)}
           aria-expanded={legendOpen}
+          aria-label="Leyenda del mapa"
           className="flex h-11 items-center gap-1.5 rounded-full border border-border px-3 text-sm hover:bg-border/40 lg:hidden"
         >
           <BookOpen size={18} /> <span className="hidden sm:inline">Leyenda</span>
@@ -642,7 +643,7 @@ export function GuideView({
           </div>
         </div>
       )}
-    </div>
+    </main>
   );
 }
 

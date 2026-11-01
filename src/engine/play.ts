@@ -444,7 +444,7 @@ export function stepPlay(game: Game, prev: PlayState, input: Dir): StepResult {
 export function waitPlay(game: Game, prev: PlayState): StepResult {
   const none: StepResult = { state: prev, events: [], dir: 2, trail: [], outcome: "blocked" };
   if (prev.arrived || prev.lost || !game.shadow || !prev.shadow) return none;
-  const s: PlayState = { ...prev, ticks: prev.ticks + 1 };
+  const s: PlayState = { ...prev, memo: prev.memo.slice(), ticks: prev.ticks + 1 };
   const events: PlayEvent[] = [{ type: "waited" }];
   const radiusBefore = visionRadius(prev);
   if (s.invert) {

@@ -131,19 +131,24 @@ describe("LA SOMBRA, 5,000 draws", () => {
     const [lo, hi] = TUNING.shadow.routeLength;
     const byLen = new Map<number, number>();
     const shapes = new Set<string>();
+    const shapeCount = new Map<string, number>();
     for (const { game } of shadowed()) {
       const sh = game.shadow!;
       byLen.set(sh.route.length, (byLen.get(sh.route.length) ?? 0) + 1);
       const W = game.grid.width;
       const x0 = Math.min(...sh.route.map((c) => c % W));
       const y0 = Math.min(...sh.route.map((c) => Math.floor(c / W)));
-      shapes.add(sh.route.map((c) => `${(c % W) - x0},${Math.floor(c / W) - y0}`).join(";"));
+      const shape = sh.route.map((c) => `${(c % W) - x0},${Math.floor(c / W) - y0}`).join(";");
+      shapes.add(shape);
+      shapeCount.set(shape, (shapeCount.get(shape) ?? 0) + 1);
     }
     expect(byLen.size).toBeGreaterThanOrEqual(hi - lo - 3);
     const most = Math.max(...byLen.values()) / shadowed().length;
     expect(most).toBeLessThan(0.12);
-    // Routes are copies of each other (up to translation) in well under 1 % of draws.
-    expect(shapes.size / shadowed().length).toBeGreaterThan(0.99);
+    // Shapes (up to translation) are copies of each other only in a few short, plain routes (a straight
+    // stretch or an L looks the same in any maze), and no single shape takes even 1 % of the draws.
+    expect(shapes.size / shadowed().length).toBeGreaterThan(0.9);
+    expect(Math.max(...shapeCount.values()) / shadowed().length).toBeLessThan(0.01);
     // Never one length or shape always.
     expect(new Set(shadowed().map((d) => d.game.shadow!.shape)).size).toBe(2);
   });

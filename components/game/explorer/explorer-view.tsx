@@ -297,7 +297,7 @@ export function ExplorerView({
   const doorColors = [...new Set(game.doors.map((d) => d.color))].sort();
 
   return (
-    <div className="fixed inset-0 flex flex-col bg-background">
+    <main className="fixed inset-0 flex flex-col bg-background">
       <header className="relative z-10 flex items-center gap-2 border-b border-border bg-card/90 px-2 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] backdrop-blur sm:px-4">
         <button onClick={onQuit} aria-label="Salir de la partida" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-border/50">
           <X size={22} />
@@ -511,7 +511,7 @@ export function ExplorerView({
           onClose={() => setTrial(null)}
         />
       )}
-    </div>
+    </main>
   );
 }
 
