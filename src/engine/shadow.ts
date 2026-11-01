@@ -315,21 +315,35 @@ function drawRoute(w: ShadowWorld, rng: ReturnType<typeof createRng>): { route: 
     }
   }
 
-  // There and back: a self-avoiding walk along the corridors.
-  for (let t = 0; t < 120; t++) {
+  // There and back: a self-avoiding path along the corridors from a random cell, found
+  // by a randomized depth-first search with a small budget so it can back out of dead
+  // ends. It insists on the drawn length (lengths come out near-uniform wherever the
+  // maze has room) and settles for any legal length after 90 tries.
+  for (let t = 0; t < 140; t++) {
     const start = rng.pick(cells);
     const want = rng.range(lo, hi);
     const walk = [start];
     const seen = new Set(walk);
-    while (walk.length < want) {
-      const tail = walk[walk.length - 1];
-      const options = openNeighbors(w, tail).filter((n) => !seen.has(n));
-      if (options.length === 0) break;
-      const n = rng.pick(options);
-      walk.push(n);
-      seen.add(n);
-    }
-    if (walk.length >= lo) return { route: walk, shape: "ping" };
+    let budget = 500;
+    let longest = walk.slice();
+    const dfs = (): boolean => {
+      if (walk.length === want) return true;
+      if (walk.length > longest.length) longest = walk.slice();
+      if (budget-- <= 0) return false;
+      const end = walk[walk.length - 1];
+      for (const n of rng.shuffle(openNeighbors(w, end))) {
+        if (seen.has(n)) continue;
+        walk.push(n);
+        seen.add(n);
+        if (dfs()) return true;
+        walk.pop();
+        seen.delete(n);
+        if (budget <= 0) return false;
+      }
+      return false;
+    };
+    if (dfs()) return { route: walk, shape: "ping" };
+    if (t >= 90 && longest.length >= lo) return { route: longest, shape: "ping" };
   }
   void g;
   return null;

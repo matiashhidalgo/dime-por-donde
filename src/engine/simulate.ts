@@ -1,7 +1,7 @@
 import { cureKey, inputForCursed } from "./curses";
 import { DIRS, type Dir, bfs, degree, isOpen, neighbor } from "./grid";
 import { allCombos, clueHolds, lockTrial, sameFeedback, scoreGuess } from "./lock";
-import { PIT_KNOWN, type PlayState, createPlay, emergencyAvailable, sealCount, stepPlay, takeEmergencyExit } from "./play";
+import { PIT_KNOWN, type PlayState, createPlay, emergencyAvailable, sealCount, stepPlay, takeEmergencyExit, waitPlay } from "./play";
 import type { Rng } from "./rng";
 import { invertDir } from "./rules";
 import { sealKey } from "./sealcode";
@@ -46,6 +46,11 @@ import type { Game, Station } from "./types";
  *  - v2 curses: turned or mirrored controls add `curseConfusion` to wrong
  *    turns, blindness adds it to pit slips; after `cureAfter` moves the pair
  *    cures it (the guide errs like with figures, `figMiss`).
+ *  - La Sombra (anexo etapa 5): the pair can't see it, but they hear the
+ *    heartbeat and the guide knows the route. Before a step that would touch it,
+ *    they notice with chance `shadowDodge` (less against a hunter) and wait a
+ *    tick instead, up to MAX_WAITS in a row; otherwise they walk into it. Steps
+ *    taken while lost (wrong branches) get no such care.
  *  - In danger (≤ 1 heart) with a seal or two, they make for the exit and
  *    take the emergency way out.
  */
@@ -64,18 +69,25 @@ export interface PairProfile {
   cureAfter: number;
   pianoMiss: number;
   tangramMiss: number;
+  /** Chance of noticing (and waiting out) a step that would touch La Sombra. */
+  shadowDodge: number;
   /** Modeled seconds per complete answer (describe, try keys or pieces, check). */
   pianoSecs: number;
   tangramSecs: number;
 }
 
+/** Longest run of waits to let La Sombra pass. */
+export const MAX_WAITS = 6;
+/** A hunter is harder to dodge: it comes toward you. */
+export const HUNTER_DODGE = 0.6;
+
 /** After each wrong answer at the piano or the tangram, the next one misses this much less often. */
 export const TRIAL_LEARN = 0.6;
 
 export const PROFILES: readonly PairProfile[] = [
-  { name: "competente", pitSlip: 0.1, wrongTurn: 0.15, wander: 4, refillAt: 0.5, detour: 10, figMiss: 0.15, keyTypo: 0.05, lockSloppy: 0.1, curseConfusion: 0.1, cureAfter: 4, pianoMiss: 0.35, tangramMiss: 0.25, pianoSecs: 40, tangramSecs: 50 },
-  { name: "normal", pitSlip: 0.2, wrongTurn: 0.25, wander: 6, refillAt: 0.4, detour: 8, figMiss: 0.3, keyTypo: 0.1, lockSloppy: 0.3, curseConfusion: 0.2, cureAfter: 7, pianoMiss: 0.55, tangramMiss: 0.4, pianoSecs: 50, tangramSecs: 65 },
-  { name: "despistada", pitSlip: 0.35, wrongTurn: 0.4, wander: 8, refillAt: 0.3, detour: 6, figMiss: 0.5, keyTypo: 0.2, lockSloppy: 0.5, curseConfusion: 0.3, cureAfter: 12, pianoMiss: 0.7, tangramMiss: 0.6, pianoSecs: 60, tangramSecs: 80 },
+  { name: "competente", pitSlip: 0.1, wrongTurn: 0.15, wander: 4, refillAt: 0.5, detour: 10, figMiss: 0.15, keyTypo: 0.05, lockSloppy: 0.1, curseConfusion: 0.1, cureAfter: 4, pianoMiss: 0.35, tangramMiss: 0.25, shadowDodge: 0.8, pianoSecs: 40, tangramSecs: 50 },
+  { name: "normal", pitSlip: 0.2, wrongTurn: 0.25, wander: 6, refillAt: 0.4, detour: 8, figMiss: 0.3, keyTypo: 0.1, lockSloppy: 0.3, curseConfusion: 0.2, cureAfter: 7, pianoMiss: 0.55, tangramMiss: 0.4, shadowDodge: 0.55, pianoSecs: 50, tangramSecs: 65 },
+  { name: "despistada", pitSlip: 0.35, wrongTurn: 0.4, wander: 8, refillAt: 0.3, detour: 6, figMiss: 0.5, keyTypo: 0.2, lockSloppy: 0.5, curseConfusion: 0.3, cureAfter: 12, pianoMiss: 0.7, tangramMiss: 0.6, shadowDodge: 0.3, pianoSecs: 60, tangramSecs: 80 },
 ];
 
 export interface SimResult {
@@ -91,6 +103,11 @@ export interface SimResult {
   seals: number;
   /** Trial failures that cost light (and sometimes a heart). */
   trialPaid: number;
+  /** Times La Sombra touched the explorer, and ticks spent waiting for it to pass. */
+  touches: number;
+  waits: number;
+  /** The map had a Sombra. */
+  shadowed: boolean;
   /** Modeled seconds spent at piano and tangram stations (answers × seconds per answer). */
   trialSecs: { piano: number[]; tangram: number[] };
 }
@@ -103,6 +120,8 @@ export function simulatePair(game: Game, p: PairProfile, rng: Rng, opts: { heart
   let plan: Dir[] = [];
   let target = -1;
   let cursedFor = 0;
+  let waits = 0;
+  let waitsRow = 0;
 
   // The pair knows what the curse does once it bites: they press what goes where they mean.
   const step = (d: Dir) => {
@@ -115,6 +134,8 @@ export function simulatePair(game: Game, p: PairProfile, rng: Rng, opts: { heart
     } else cursedFor = 0;
     return r;
   };
+  const wouldTouch = (d: Dir) =>
+    stepPlay(game, s, invertDir(inputForCursed(d, s.curse), s.invert?.axes ?? null)).events.some((e) => e.type === "shadowTouch");
   const cure = () => {
     let fails = 0;
     while (fails < 9 && rng.chance(p.figMiss)) fails++;
@@ -206,6 +227,13 @@ export function simulatePair(game: Game, p: PairProfile, rng: Rng, opts: { heart
         continue;
       }
     }
+    if (game.shadow && s.shadow && waitsRow < MAX_WAITS && wouldTouch(d) && rng.chance(p.shadowDodge * (game.shadow.hunter ? HUNTER_DODGE : 1))) {
+      s = waitPlay(game, s).state;
+      waits++;
+      waitsRow++;
+      continue;
+    }
+    waitsRow = 0;
     const r = step(d);
     plan.shift();
     if (r.outcome !== "moved" && r.outcome !== "teleported") replan();
@@ -225,6 +253,9 @@ export function simulatePair(game: Game, p: PairProfile, rng: Rng, opts: { heart
     stars,
     seals: sealCount(s),
     trialPaid,
+    touches: s.touches,
+    waits,
+    shadowed: !!game.shadow,
     trialSecs,
   };
 }
