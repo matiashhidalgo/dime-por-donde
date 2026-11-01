@@ -267,6 +267,10 @@ export function fingerprint(game: Game): string {
     // v2+ only, so v1 fingerprints (golden) are untouched.
     ...(game.stations ? [game.stations.map((s) => `${s.cell}${s.kind}${s.direction}`).join(",")] : []),
     ...(game.streak ? [`streak${game.streak.index}`] : []),
+    // La Sombra (v2 maps that have one): its patrol is part of what both devices must share.
+    ...(game.shadow
+      ? [`shadow${game.shadow.route.join(".")}:${game.shadow.shape}${game.shadow.slow}${game.shadow.phase}${game.shadow.hunter ? "h" : ""}${game.shadow.bodies}`]
+      : []),
   ].join("|");
   const h1 = hashString(parts).toString(16).padStart(8, "0");
   const h2 = hashString(`salt:${parts}`).toString(16).padStart(8, "0");

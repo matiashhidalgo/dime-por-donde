@@ -36,6 +36,11 @@ const EVENTS: PlayEvent[] = [
   { type: "seal", index: 0, count: 1 },
   { type: "heal", hearts: 2 },
   { type: "seal", index: 1, count: 3 },
+  { type: "shadowTouch", hearts: 2 },
+  { type: "shadowTouch", hearts: 1 },
+  { type: "shadowStunned", count: 1 },
+  { type: "hurt", cause: "shadow", hearts: 2 },
+  { type: "waited" },
 ];
 
 /**

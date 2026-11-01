@@ -115,9 +115,12 @@ export const LEGACY_MODE_NAME: Record<CodeMode, string> = {
  * mixing this into the seal makes an old and a new device read different
  * seals, so the pair notices before playing.
  *  3: Racha, curses, graded endings. 4: piano and tangram join the stations
- *  (the same v2 code can draw different trials than under 3).
+ *  (the same v2 code can draw different trials than under 3). 5: La Sombra (the
+ *  same v2 code now also draws a patrol, plus the «esperar» action and the touch
+ *  rules; a device still on 4 plays the same maze and stations without it, and
+ *  reads a different seal). v1 codes get no Sombra, but their seal changes too.
  */
-export const RULES_VERSION = 4;
+export const RULES_VERSION = 5;
 
 /**
  * A short phrase both players read aloud to confirm they have the same maze
