@@ -20,6 +20,7 @@ import {
 } from "./place";
 import { type Rng, createRng, hashString } from "./rng";
 import { routeDecisions, routeEffort, solve } from "./solver";
+import { withShadow } from "./shadowaudit";
 import { withStations } from "./stations";
 import { THEMES, THEME_IDS, type ThemeId } from "./themes";
 import type { Game, GameStats } from "./types";
@@ -55,7 +56,7 @@ export function generateGame(input: GenerateInput): Game {
     for (let variant = 0; ; variant++) {
       const seed = variant === 0 ? input.seed : `${input.seed}~${variant}`;
       const game = withStations({ ...generateGame({ ...input, seed, version: 1 }), version: 2 });
-      if (game) return game;
+      if (game) return withShadow(game);
     }
   }
   if (version !== 1) throw new Error(`generator v${version} not available`);

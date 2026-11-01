@@ -3,6 +3,7 @@ import { generateGame } from "./generate";
 import { DIRS, bfs, isOpen, neighbor } from "./grid";
 import { createRng, hashString } from "./rng";
 import { solve } from "./solver";
+import { withShadow } from "./shadowaudit";
 import { withStations } from "./stations";
 import { THEME_IDS, type ThemeId } from "./themes";
 import { TUNING } from "./tuning";
@@ -78,8 +79,9 @@ export function streakGame(seed: string, index: number): Game {
     const base = generateGame({ seed: mapSeed, level: "hard", version: 1, theme });
     const delta = pitDeltaFor(index);
     const pitted = delta < 0 ? withFewerPits(base, -delta, `${mapSeed}|streak|pits`) : withExtraPits(base, delta, `${mapSeed}|streak|pits`);
-    const game = withStations({ ...pitted, version: 2, streak: { index } });
-    if (game) {
+    const staged = withStations({ ...pitted, version: 2, streak: { index } });
+    if (staged) {
+      const game = withShadow(staged);
       if (mapCache.size > 8) mapCache.clear();
       mapCache.set(id, game);
       return game;

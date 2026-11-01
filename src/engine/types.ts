@@ -2,6 +2,7 @@ import type { Level } from "./code";
 import type { ObstacleType } from "./difficulty";
 import type { Grid } from "./grid";
 import type { MazeAlgorithm } from "./maze";
+import type { Shadow } from "./shadow";
 import type { ThemeId } from "./themes";
 
 /** Shapes double as color names so nothing depends on color alone. */
@@ -164,6 +165,10 @@ export interface Game {
   landmarks: Landmark[];
   /** v2+: the 3 sealed stations (absent on v1 games: just reach the exit). */
   stations?: Station[];
+  /** v2+: La Sombra, a patrol drawn by seed that passed the fairness audit (anexo etapa 5). */
+  shadow?: Shadow;
+  /** v2+: why this map has none — the roll said no, or no seed attempt passed the audit. */
+  shadowSkip?: "roll" | "audit";
   /** Streak maps only: which map of the streak this is (its MAP level). */
   streak?: { index: number };
   solution: Solution;
