@@ -12,6 +12,8 @@
 import { PROFILES, TUNING, createRng, generateGame, simulatePair, simulateStreak } from "../src/engine";
 import type { Game, PairProfile } from "../src/engine";
 
+// Try a setting without editing tuning.ts: SHADOW='{"lightLoss":0.1}' npm run calibrate 400
+if (process.env.SHADOW) Object.assign(TUNING.shadow, JSON.parse(process.env.SHADOW));
 const N = Number(process.argv[2] ?? 300);
 const SWEEP = process.argv.includes("sweep");
 const STREAK = process.argv.includes("streak");

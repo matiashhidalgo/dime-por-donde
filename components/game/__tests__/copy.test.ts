@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { KEY_COLORS, PORTAL_SYMBOLS, type PlayEvent, THEMES, TUNING, createPlay, generateGame } from "@/src/engine";
+import { type PlayEvent, TUNING, createPlay, generateGame } from "@/src/engine";
 import { resultPhrase, startTip } from "@/lib/phrases";
 import { describeCell } from "../guide/describe";
 import { createMessenger } from "../explorer/messages";
+import { NAMES } from "./names";
 
 const game = generateGame({ seed: "COPY22", level: "hard", version: 1 });
 const state = { ...createPlay(game), hearts: 2, pits: 1 };
@@ -42,23 +43,6 @@ const EVENTS: PlayEvent[] = [
   { type: "hurt", cause: "shadow", hearts: 2 },
   { type: "waited" },
 ];
-
-/**
- * v2 rule (GAME_SPEC_V2.md §2): nothing on screen names an object. The pair
- * invents the words. Generic mechanic words (llave, puerta, pozo, farol…) are
- * fine; v1's names — landmark kinds and variants, key/portal colors and
- * shapes, themed pit and ice names — are not.
- */
-const esc = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const FORBIDDEN = [
-  ...Object.values(THEMES).flatMap((t) => [
-    ...t.landmarks.flatMap((l) => [l.name, ...l.variants]),
-    ...Object.values(t.labels).filter((w) => w !== "pozo"),
-  ]),
-  ...KEY_COLORS.flatMap((c) => [c.colorName, c.shapeName]),
-  ...PORTAL_SYMBOLS.flatMap((p) => [p.colorName, p.shapeName]),
-];
-const NAMES = new RegExp(`(^|[^\\p{L}])(${[...new Set(FORBIDDEN)].map(esc).join("|")})(?![\\p{L}])`, "iu");
 
 describe("game copy", () => {
   it("event lines rotate and never repeat back to back", () => {
@@ -108,7 +92,7 @@ describe("game copy", () => {
     }
   });
 
-  it("both devices pick the same end line and tip for a game", () => {
+  it("a screen that re-renders keeps its end line and tip (memoized per game seed)", () => {
     const o = { seed: "X", escaped: true, hearts: 2, maxHearts: TUNING.hearts, pits: 1, stars: 2, maxStars: 3 };
     expect(resultPhrase(o)).toBe(resultPhrase({ ...o }));
     expect(startTip("X", "guide")).toBe(startTip("X", "guide"));

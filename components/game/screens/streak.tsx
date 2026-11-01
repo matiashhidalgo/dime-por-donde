@@ -5,7 +5,7 @@ import { Compass, Flag, Heart, HeartCrack, Home, KeyRound, LifeBuoy, Map as MapI
 import { RELAY_KEY_LENGTH, type RelayState, TUNING, decodeRelay, encodeRelay, formatRelayKey, normalizeCodeInput } from "@/src/engine";
 import { audio, buzz } from "@/lib/audio";
 import { type HistoryEntry, ROLE_NAME, bestStreak, newEntryId, saveEntry, saveStreak } from "@/lib/history";
-import { emergencyPhrase, relayPhrase, streakEndPhrase } from "@/lib/phrases";
+import { emergencyPhrase, mapPhrase, relayPhrase, streakEndPhrase } from "@/lib/phrases";
 import { usePrefersReducedMotion } from "@/lib/hooks";
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
@@ -21,7 +21,7 @@ import { EmergencyHatch, ENDING_TITLE, type Ending, type ExpeditionEnd } from ".
  */
 
 const mapLine = (ending: Ending, seed: string, index: number, seals: number) =>
-  ending === "escaped" ? emergencyPhrase(`${seed}#${index}`, seals) : ending === "won" ? `Mapa ${index + 1}, superado. Que no se les suba.` : `El mapa ${index + 1} se los tragó.`;
+  ending === "escaped" ? emergencyPhrase(`${seed}#${index}`, seals) : mapPhrase(seed, index, ending === "won");
 
 /** One map of the streak in this device's history (v1 deploys read it as an ordinary round). */
 function useMapEntry(session: Session, end: ExpeditionEnd, resumed: boolean) {
