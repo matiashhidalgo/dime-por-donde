@@ -201,6 +201,24 @@ export class ExplorerController {
     this.wake();
   }
 
+  /** Dev-only (QA from the console, see explorer-view): puts the explorer on `cell`, camera and fog included. */
+  teleportDev(cell: number): void {
+    const W = this.game.grid.width;
+    const x = (cell % W) + 0.5;
+    const y = Math.floor(cell / W) + 0.5;
+    this.logic = { ...this.logic, cell };
+    this.scene.state = this.logic;
+    Object.assign(this.scene.player, { x, y });
+    Object.assign(this.scene.cam, { x, y });
+    this.computeTargets();
+    this.scene.vis.set(this.scene.target);
+    this.syncShadows();
+    this.scene.closeness = this.closeness();
+    this.emitHud();
+    this.ensureBeat();
+    this.wake();
+  }
+
   release(dir?: Dir): void {
     this.held = dir === undefined ? [] : this.held.filter((d) => d !== dir);
   }

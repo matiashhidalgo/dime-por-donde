@@ -100,16 +100,19 @@ export const TUNING = {
    * per explorer step. v2 maps only; v1 codes never have one.
    */
   shadow: {
-    /** Chance a v2 map has a Sombra. In a streak it rises per map index, up to `cap`. */
-    chance: { base: 0.66, perMap: 0.04, cap: 0.92 },
+    /**
+     * Chance a v2 map has a Sombra: `base` for a single expedition; in a Racha it starts at
+     * `start` on map 0 and rises `perMap` per map, up to `cap` (same shape for `fast` and `hunter`).
+     */
+    chance: { base: 0.66, start: 0.3, perMap: 0.07, cap: 0.92 },
     /** Patrol length in cells (a closed loop or a there-and-back). */
     routeLength: [12, 40] as readonly [number, number],
     /** Chance of a closed loop when the maze has one of the right length (else there-and-back). */
     loopShare: 0.4,
     /** Chance it moves a cell every tick (else every 2 ticks). Streak: rises per map to `cap`. */
-    fast: { base: 0.3, perMap: 0.05, cap: 0.7 },
+    fast: { base: 0.3, start: 0.1, perMap: 0.05, cap: 0.7 },
     /** «Cazador»: chance and streak growth. */
-    hunter: { base: 0.22, perMap: 0.06, cap: 0.6 },
+    hunter: { base: 0.22, start: 0.05, perMap: 0.05, cap: 0.6 },
     /** Passage distance within which a hunter turns toward the explorer. */
     hunterRadius: 4,
     /** A chase lasts at most this many ticks; then it gives up and goes back to its route. */

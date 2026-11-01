@@ -19,7 +19,7 @@ export function FirstHint({ id, className }: { id: Exclude<HintId, "tour">; clas
   }, [id]);
   if (!show) return null;
   return (
-    <div role="note" className={cn("flex items-start gap-2 rounded-2xl border border-accent/30 bg-accent/10 px-3 py-2 text-sm", className)}>
+    <div role="note" className={cn("flex items-start gap-2 rounded-2xl border border-accent/50 bg-card px-3 py-2 text-sm shadow-md", className)}>
       <Lightbulb size={16} className="mt-0.5 shrink-0 text-accent" aria-hidden />
       <p className="min-w-0 flex-1">{HINT_TEXT[id]}</p>
       <button onClick={() => setShow(false)} aria-label="Cerrar la pista" className="-m-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-border/50">

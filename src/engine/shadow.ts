@@ -293,8 +293,13 @@ export function retreat(b: Body, ticks: number): Body {
 
 // ── Drawing a Sombra for a map ───────────────────────────────────────────────
 
-/** Chance of something that grows with the streak map index (capped). */
-export const rampFor = (r: { base: number; perMap: number; cap: number }, index: number): number => Math.min(r.cap, r.base + r.perMap * index);
+/**
+ * Chance of something that grows with the streak map index (capped). A single
+ * expedition (no streak index) uses `base`; a Racha starts gentler at `start`
+ * on map 0 and climbs `perMap` per map up to `cap`.
+ */
+export const rampFor = (r: { base: number; start?: number; perMap: number; cap: number }, streakIndex: number | undefined): number =>
+  streakIndex === undefined ? r.base : Math.min(r.cap, (r.start ?? r.base) + r.perMap * streakIndex);
 
 function drawRoute(w: ShadowWorld, rng: ReturnType<typeof createRng>): { route: number[]; shape: "loop" | "ping" } | null {
   const [lo, hi] = TUNING.shadow.routeLength;
@@ -379,11 +384,11 @@ export function drawShadow(game: Game, key: string, attempt: number): Shadow | n
   const rng = createRng(key);
   const r = drawRoute(w, rng.fork("route"));
   if (!r) return null;
-  const index = game.streak?.index ?? 0;
+  const index = game.streak?.index;
   const S = TUNING.shadow;
   const slow: 1 | 2 = rng.fork("speed").chance(rampFor(S.fast, index)) ? 1 : 2;
   const hunter = rng.fork("hunter").chance(rampFor(S.hunter, index));
-  const two = !hunter && index >= S.twoBodiesFrom && rng.fork("bodies").chance(S.twoBodiesChance);
+  const two = !hunter && index !== undefined && index >= S.twoBodiesFrom && rng.fork("bodies").chance(S.twoBodiesChance);
   const sh: Shadow = {
     route: r.route,
     shape: r.shape,
@@ -403,8 +408,7 @@ export function drawShadow(game: Game, key: string, attempt: number): Shadow | n
 
 /** Does this map get a Sombra at all? (Rolled apart from the route, so a retry doesn't change it.) */
 export function shadowRolls(game: Game): boolean {
-  const index = game.streak?.index ?? 0;
-  return createRng(`${game.seed}|v2|shadow|exists`).chance(rampFor(TUNING.shadow.chance, index));
+  return createRng(`${game.seed}|v2|shadow|exists`).chance(rampFor(TUNING.shadow.chance, game.streak?.index));
 }
 
 // ── Look ─────────────────────────────────────────────────────────────────────

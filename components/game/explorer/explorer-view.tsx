@@ -182,6 +182,7 @@ export function ExplorerView({
       // Dev-only handles for playtesting and perf checks from the console.
       const w = window as unknown as { __explorer?: ExplorerController; __explorerSolution?: Dir[]; __explorerRoute?: (to: number) => Dir[] };
       w.__explorer = ctrl;
+      (w as { __teleport?: (c: number) => void }).__teleport = (c) => ctrl.teleportDev(c);
       w.__explorerSolution = solve(game, game.start, game.exit).dirs;
       // Shortest route from where the explorer stands now, with the keys in hand.
       w.__explorerRoute = (to: number) => solve(game, ctrl.state.cell, to, ctrl.state.keys).dirs;
@@ -419,7 +420,7 @@ export function ExplorerView({
         </div>
 
         {hint && (
-          <p className="pointer-events-none absolute inset-x-0 top-40 mx-auto w-fit rounded-full bg-black/55 px-4 py-2 text-center text-sm text-white">
+          <p className={cn("pointer-events-none absolute inset-x-0 mx-auto w-fit rounded-full bg-black/55 px-4 py-2 text-center text-sm text-white", hud?.hasShadow ? "top-[14rem] sm:top-40" : "top-40")}>
             {pad ? "Desliza o usa la cruceta · mantén para caminar" : "Flechas o WASD · mantén para caminar"}
           </p>
         )}
@@ -445,7 +446,7 @@ export function ExplorerView({
         )}
 
         {hud?.hasShadow && !overlay && !hud.lost && !hud.arrived && (
-          <div className="absolute inset-x-3 top-14 z-10 mx-auto max-w-md sm:top-16" onPointerDown={(e) => e.stopPropagation()}>
+          <div className="absolute inset-x-3 top-[6.5rem] z-10 mx-auto max-w-md sm:top-16" onPointerDown={(e) => e.stopPropagation()}>
             <FirstHint id="shadow-explorer" />
           </div>
         )}
