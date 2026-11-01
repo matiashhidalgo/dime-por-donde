@@ -10,6 +10,7 @@ import {
   THEMES,
   exitOpen,
   isOpen,
+  shadowLook,
   stationEmblems,
 } from "@/src/engine";
 import { SWIRL_COLOR } from "../guide/map-art";
@@ -87,6 +88,24 @@ export interface Scene {
   hurtFx: number;
   /** Items grouped by row for back-to-front drawing. */
   rows: RowItem[][];
+  /** La Sombra's bodies as drawn (cell units, eased toward their cell). */
+  shadows: ShadowDraw[];
+  /** Cells within sight right now (>= 0); La Sombra only shows there. */
+  seeDist: Int8Array;
+  /** 0..1 pulse of the heartbeat; 1 on the beat, easing down. */
+  pulse: number;
+  /** 0..1 how near La Sombra is by passages (0 = out of earshot). */
+  closeness: number;
+  /** Reduced motion: no sway, a gentler pulse. */
+  reduced: boolean;
+}
+
+export interface ShadowDraw {
+  x: number;
+  y: number;
+  cell: number;
+  /** Frozen by a lantern. */
+  stunned: boolean;
 }
 
 export type RowItem =
@@ -284,6 +303,7 @@ export function draw(ctx: CanvasRenderingContext2D, sc: Scene): void {
       else if (item.kind === "station") drawStation(ctx, sc, item.index, cx, cy, T);
       else drawThing(ctx, sc, item.cell, cx, cy, T, wallH, thick);
     }
+    for (const b of sc.shadows) if (Math.floor(b.y) === y) drawShadowBody(ctx, sc, b, ox + b.x * T, oy + b.y * T, T);
     if (y === playerRow && p.alpha > 0.01) drawPlayer(ctx, psx, psy, T, p, HERO[game.theme] ?? pal.accent, sc.time);
   }
 
@@ -357,6 +377,17 @@ export function draw(ctx: CanvasRenderingContext2D, sc: Scene): void {
       ctx.arc(qx, qy, q.size * T, 0, Math.PI * 2);
       ctx.fill();
     }
+  }
+
+  // ── La Sombra close by: the heartbeat darkens the edges, on the beat.
+  if (sc.closeness > 0 && sc.pulse > 0.01) {
+    const k = sc.pulse * (0.35 + 0.65 * sc.closeness) * (sc.reduced ? 0.5 : 1);
+    const beat = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.2, W / 2, H / 2, Math.max(W, H) * 0.72);
+    beat.addColorStop(0, "rgba(20,8,40,0)");
+    beat.addColorStop(1, `rgba(20,8,40,${0.62 * k})`);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = beat;
+    ctx.fillRect(0, 0, W, H);
   }
 
   // ── A heart lost: a red pulse closing in from the edges.
@@ -825,6 +856,64 @@ function drawLandmark(ctx: CanvasRenderingContext2D, sc: Scene, index: number, c
   ctx.lineWidth = 0.09;
   ctx.lineJoin = "round";
   ctx.stroke(path);
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────── la sombra
+
+const lookPaths = new Map<string, Path2D>();
+
+/**
+ * A body of La Sombra: its generated silhouette in near-black, eyes lit. Only
+ * inside the candle's sight (fog hides it), eyes shut while stunned.
+ */
+function drawShadowBody(ctx: CanvasRenderingContext2D, sc: Scene, b: ShadowDraw, cx: number, cy: number, T: number) {
+  const sh = sc.game.shadow;
+  if (!sh) return;
+  const seen = sc.seeDist[b.cell] >= 0;
+  const a = Math.min(1, sc.vis[b.cell] * 1.3);
+  if (!seen || a < 0.2) return;
+  const look = shadowLook(sh);
+  let path = lookPaths.get(sh.look);
+  if (!path) {
+    if (lookPaths.size > 16) lookPaths.clear();
+    path = new Path2D(look.d);
+    lookPaths.set(sh.look, path);
+  }
+  const r = T * 0.4;
+  const sway = sc.reduced ? 0 : Math.sin((sc.time / 420) * look.sway) * 0.05;
+  ctx.save();
+  ctx.globalAlpha = a * 0.4;
+  ctx.fillStyle = "#000";
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + T * 0.1, r * 0.8, r * 0.26, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = a * (b.stunned ? 0.7 : 0.95);
+  ctx.translate(cx, cy + T * 0.08 - r + (sc.reduced ? 0 : Math.sin(sc.time / 520) * T * 0.015));
+  ctx.scale(r * (1 + sway), r * (1 - sway));
+  ctx.fillStyle = b.stunned ? "#2a2440" : "#0b0814";
+  ctx.fill(path);
+  ctx.strokeStyle = b.stunned ? "rgba(255,255,255,0.7)" : "rgba(130,100,220,0.45)";
+  ctx.lineWidth = 0.07;
+  ctx.lineJoin = "round";
+  ctx.stroke(path);
+  for (const e of look.eyes) {
+    if (b.stunned) {
+      ctx.strokeStyle = "rgba(255,255,255,0.8)";
+      ctx.lineWidth = 0.05;
+      ctx.beginPath();
+      ctx.moveTo(e.x - e.r, e.y);
+      ctx.lineTo(e.x + e.r, e.y);
+      ctx.stroke();
+      continue;
+    }
+    ctx.fillStyle = "#f6ecb0";
+    ctx.shadowColor = "#f6ecb0";
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
 }
 

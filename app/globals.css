@@ -89,6 +89,12 @@ body {
   55% { opacity: 0.9; }
   70% { opacity: 0.45; }
 }
+@keyframes shadow-beat {
+  0%, 100% { transform: scale(1); opacity: 0.75; }
+  18% { transform: scale(1.3); opacity: 1; }
+  36% { transform: scale(0.95); }
+  50% { transform: scale(1.15); opacity: 1; }
+}
 @keyframes seal-pop {
   0% { transform: scale(0.3) rotate(-30deg); opacity: 0; }
   60% { transform: scale(1.15) rotate(6deg); opacity: 1; }
@@ -111,7 +117,8 @@ body {
 .toast-in { animation: toast-in 180ms ease-out; }
 .heart-lost { animation: heart-lost 700ms ease-out; }
 .candle-gutter { animation: candle-gutter 1.3s ease-in-out infinite; }
+.shadow-beat { animation: shadow-beat 1s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .toast-in, .heart-lost, .candle-gutter, .seal-pop, .wrong-shake { animation: none; }
+  .toast-in, .heart-lost, .candle-gutter, .shadow-beat, .seal-pop, .wrong-shake { animation: none; }
   .seal-spark { display: none; }
 }

@@ -46,7 +46,9 @@ export type Sfx =
   | "streakEnd"
   | "snap"
   | "turn"
-  | "lift";
+  | "lift"
+  | "shadowHit"
+  | "shadowStun";
 
 const MODE_KEY = "laberinto.sound.v1";
 const MASTER = 0.8;
@@ -469,12 +471,42 @@ class AudioEngine {
       case "lift":
         this.tone(420, t, 0.07, { gain: 0.04, to: 560 });
         break;
+      case "shadowHit":
+        // Something cold brushes past: a low swell, a sour tritone and a rush of air.
+        this.tone(hz(40), t, 0.55, { gain: 0.22, to: hz(33), attack: 0.02 });
+        this.tone(hz(63), t + 0.02, 0.5, { type: "sawtooth", gain: 0.03, to: hz(59), vibrato: 6 });
+        this.tone(hz(69), t + 0.02, 0.5, { type: "sawtooth", gain: 0.025, to: hz(65), vibrato: 6 });
+        this.noise(t, 0.45, { type: "lowpass", freq: 1500, to: 160, gain: 0.09, echo: 0.3 });
+        break;
+      case "shadowStun":
+        // The lantern flashes: a glassy chirp falling over a hiss, and the thing flinches.
+        this.noise(t, 0.3, { type: "highpass", freq: 2500, to: 6000, gain: 0.05 });
+        this.tone(hz(88), t, 0.35, { type: "triangle", gain: 0.05, to: hz(76), echo: 0.4 });
+        this.tone(hz(52), t + 0.1, 0.4, { gain: 0.08, to: hz(46) });
+        break;
       case "streakEnd":
         // A small fanfare that runs out of breath.
         this.arp([72, 76, 79], t, 0.12, { type: "triangle", gain: 0.07, len: 0.35, echo: 0.3 });
         this.tone(hz(84), t + 0.4, 0.9, { type: "triangle", gain: 0.05, to: hz(79), vibrato: 4, echo: 0.4 });
         break;
     }
+  }
+
+  // ───────────────────────────────────────────── the heartbeat (La Sombra)
+
+  /**
+   * One «lub-dub». `closeness` 0..1 (1 = right behind you): closer is louder
+   * and lower. The caller sets the tempo; silent when sound is off or locked.
+   */
+  heartbeat(closeness: number): void {
+    if (this.mode === "off" || !this.ctx || this.ctx.state !== "running") return;
+    const t = this.ctx.currentTime + 0.005;
+    const k = Math.max(0, Math.min(1, closeness));
+    const f = 82 - 30 * k;
+    const g = 0.07 + 0.17 * k;
+    this.tone(f, t, 0.16, { gain: g, to: f * 0.62, attack: 0.012 });
+    this.tone(f * 0.9, t + 0.17, 0.2, { gain: g * 0.75, to: f * 0.55, attack: 0.012 });
+    if (k > 0.6) this.noise(t, 0.08, { type: "lowpass", freq: 300, gain: 0.04 * k });
   }
 
   // ───────────────────────────────────────────── the witch's piano

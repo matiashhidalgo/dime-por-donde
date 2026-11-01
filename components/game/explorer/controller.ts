@@ -11,12 +11,15 @@ import {
   SEEN,
   type StepResult,
   type TrialResult,
+  TUNING,
   createPlay,
   lightFraction,
+  shadowDistance,
   starCount,
   stepPlay,
   visibility,
   visionRadius,
+  waitPlay,
 } from "@/src/engine";
 import { type Sfx, audio, buzz } from "@/lib/audio";
 import { type Particle, type Scene, TRAIL_LIFE, buildRows, draw, themePalette } from "./render";
@@ -46,6 +49,10 @@ export interface HudState {
   state: PlayState;
   arrived: boolean;
   lost: boolean;
+  /** This map has a Sombra (the «esperar» control shows up). */
+  hasShadow: boolean;
+  /** 0..1 how near it is by passages (0 = out of earshot): the HUD's pulse. */
+  heat: number;
 }
 
 export interface ControllerOptions {
@@ -95,8 +102,11 @@ export class ExplorerController {
   private openedDoors = new Set<number>();
   private burstDoors = new Set<number>();
   private disposed = false;
-  /** A trial overlay is open: the maze ignores direction input. */
-  paused = false;
+  private pausedValue = false;
+  private beatTimer = 0;
+  private lastBeatAt = 0;
+  /** Ticks (heartbeat on, in ms) between beats: far → near. */
+  private static readonly BEAT_MS = [1300, 430] as const;
   readonly perf = { frames: 0, drawMs: 0, maxDrawMs: 0, slowFrames: 0 };
 
   constructor(opts: ControllerOptions) {
@@ -129,15 +139,32 @@ export class ExplorerController {
       lightFx: 1,
       hurtFx: 0,
       rows: buildRows(this.game),
+      shadows: [],
+      seeDist: new Int8Array(n).fill(-1),
+      pulse: 0,
+      closeness: 0,
+      reduced: opts.reducedMotion,
     };
+    this.syncShadows(true);
     this.dist = new Int8Array(n);
     this.computeTargets();
     this.scene.vis.set(this.scene.target);
+    this.scene.closeness = this.closeness();
     this.emitHud();
+    this.ensureBeat();
   }
 
   get state(): PlayState {
     return this.logic;
+  }
+
+  /** A trial overlay is open: the maze ignores direction input, and the Sombra holds still (and quiet). */
+  get paused(): boolean {
+    return this.pausedValue;
+  }
+  set paused(v: boolean) {
+    this.pausedValue = v;
+    if (!v) this.ensureBeat();
   }
 
   resize(width: number, height: number): void {
@@ -162,6 +189,18 @@ export class ExplorerController {
     this.wake();
   }
 
+  /** «Esperar»: one tick in place (only where La Sombra roams). */
+  wait(): void {
+    if (this.paused || this.logic.arrived || this.logic.lost || !this.game.shadow || this.queue.length > 0) return;
+    const r = waitPlay(this.game, this.logic);
+    if (r.outcome !== "waited") return;
+    this.logic = r.state;
+    this.pending = r;
+    this.queue.push({ kind: "apply" });
+    this.startQueue();
+    this.wake();
+  }
+
   release(dir?: Dir): void {
     this.held = dir === undefined ? [] : this.held.filter((d) => d !== dir);
   }
@@ -182,6 +221,62 @@ export class ExplorerController {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     clearTimeout(this.timer);
+    clearTimeout(this.beatTimer);
+    this.beatTimer = 0;
+    this.queue.length = 0;
+    this.held.length = 0;
+    this.buffer = null;
+  }
+
+  // ───────────────────────────────────────────── La Sombra: heartbeat and bodies
+
+  /** 0..1 nearness by passages, 0 when out of earshot or when nothing roams. */
+  private closeness(): number {
+    if (!this.game.shadow) return 0;
+    const d = shadowDistance(this.game, this.logic.shadow, this.logic.cell);
+    const range = TUNING.shadow.hearRange;
+    if (!Number.isFinite(d) || d > range) return 0;
+    return Math.max(0.08, Math.min(1, 1 - (d - 1) / range));
+  }
+
+  /** Starts the beat loop if it isn't running and there is something to hear. */
+  private ensureBeat(): void {
+    if (this.beatTimer || this.disposed || this.pausedValue || this.logic.arrived || this.logic.lost) return;
+    const c = this.closeness();
+    if (c <= 0) return;
+    const [slow, fast] = ExplorerController.BEAT_MS;
+    const gap = slow + (fast - slow) * c;
+    const wait = Math.max(120, gap - (performance.now() - this.lastBeatAt));
+    this.beatTimer = window.setTimeout(() => {
+      this.beatTimer = 0;
+      if (this.disposed || this.pausedValue || this.logic.arrived || this.logic.lost) return;
+      const now = this.closeness();
+      if (now > 0) {
+        this.lastBeatAt = performance.now();
+        audio.heartbeat(now);
+        if (now > 0.55) buzz([16, 70, 16]);
+        this.scene.pulse = 1;
+        this.scene.closeness = now;
+        this.wake();
+      }
+      this.ensureBeat();
+    }, wait);
+  }
+
+  /** Brings the drawn bodies in line with the rules state (snap = no easing, at the start). */
+  private syncShadows(snap = false): void {
+    const run = this.scene.state.shadow;
+    const W = this.game.grid.width;
+    if (!run) {
+      this.scene.shadows = [];
+      return;
+    }
+    run.bodies.forEach((b, i) => {
+      const x = (b.cell % W) + 0.5;
+      const y = Math.floor(b.cell / W) + 0.5;
+      const cur = this.scene.shadows[i];
+      this.scene.shadows[i] = { x: snap || !cur ? x : cur.x, y: snap || !cur ? y : cur.y, cell: b.cell, stunned: b.stun > 0 };
+    });
   }
 
   // ───────────────────────────────────────────── stepping
@@ -255,11 +350,14 @@ export class ExplorerController {
     if (!r) return;
     this.scene.state = r.state;
     this.computeTargets();
+    this.syncShadows();
+    this.scene.closeness = this.closeness();
+    this.ensureBeat();
     const p = this.scene.player;
     const reduce = this.opts.reducedMotion;
     for (const e of r.events) {
       this.opts.onEvent(e, r.state);
-      const sound = e.type === "uncurse" ? (e.cured ? "cure" : "unswirl") : EVENT_SFX[e.type];
+      const sound = e.type === "uncurse" ? (e.cured ? "cure" : "unswirl") : e.type === "hurt" && e.cause === "shadow" ? undefined : EVENT_SFX[e.type];
       if (sound) audio.play(sound, this.game.theme);
       if (reduce) continue;
       if (e.type === "star") this.burst(p.x, p.y, 14, ["#f2b84b", "#ffe08a", "#fff6d1"], true);
@@ -271,6 +369,8 @@ export class ExplorerController {
       if (e.type === "seal") this.burst(p.x, p.y - 0.4, 30, ["#f2b84b", "#ffe08a", "#fff6d1", "#ffffff"], true, 1.2);
       if (e.type === "heal") this.burst(p.x, p.y, 12, ["#ef5466", "#ffd0d6"], false, 0.8);
       if (e.type === "curse") this.burst(p.x, p.y, 16, ["#5b2fa0", "#8a5cf0", "#2a1840"], false, 0.9);
+      if (e.type === "shadowTouch") this.burst(p.x, p.y, 16, ["#0b0814", "#3b2d6b", "#8a74e0"], false, 0.9);
+      if (e.type === "shadowStunned") this.burst(p.x, p.y, 14, ["#ffffff", "#fff1c1", "#c5b6ff"], true, 0.9);
       if (e.type === "uncurse" && e.cured) this.burst(p.x, p.y, 18, ["#c5a8ff", "#ffffff", "#8fd6a8"], true, 1);
       if (e.type === "emergencyExit") this.burst(p.x, p.y, 24, ["#f2b84b", "#ffffff", "#e07a5f"], false, 1.2);
       if (e.type === "arrived") this.burst(p.x, p.y, 46, ["#e07a5f", "#f2b84b", "#3d9a5f", "#3d6fd8", "#d6589f", "#ffffff"], false, 1.6);
@@ -278,6 +378,7 @@ export class ExplorerController {
     // These happen with or without motion: they're the stakes, not decoration.
     for (const e of r.events) {
       if (e.type === "curse") buzz([30, 40, 30, 40, 30]);
+      if (e.type === "shadowTouch") buzz([60, 40, 160]);
       if (e.type === "hurt") {
         this.scene.hurtFx = reduce ? 0.6 : 1;
         if (!reduce) this.scene.shake = 1;
@@ -302,6 +403,7 @@ export class ExplorerController {
     const s = this.scene.state;
     const R = visionRadius(s);
     this.dist = visibility(this.game, s.cell, R, s.keys);
+    this.scene.seeDist = this.dist;
     const memory = DIFFICULTIES[this.game.level].memory;
     const memAlpha = memory === "full" ? 0.34 : memory === "dim" ? 0.15 : 0;
     const { target } = this.scene;
@@ -328,6 +430,8 @@ export class ExplorerController {
       state: s,
       arrived: s.arrived,
       lost: s.lost,
+      hasShadow: !!this.game.shadow,
+      heat: this.closeness(),
     });
   }
 
@@ -551,6 +655,30 @@ export class ExplorerController {
       busy = true;
     }
 
+    // La Sombra's bodies glide to their cells; the heartbeat pulse eases out.
+    for (const b of sc.shadows) {
+      const W = this.game.grid.width;
+      const tx = (b.cell % W) + 0.5;
+      const ty = Math.floor(b.cell / W) + 0.5;
+      const ddx = tx - b.x;
+      const ddy = ty - b.y;
+      if (Math.abs(ddx) + Math.abs(ddy) > 0.004) {
+        const k = reduce || Math.hypot(ddx, ddy) > 3 ? 1 : 1 - Math.exp(-dt / 70);
+        b.x += ddx * k;
+        b.y += ddy * k;
+        busy = true;
+      } else {
+        b.x = tx;
+        b.y = ty;
+      }
+      if (b.stunned && !reduce) busy = true;
+    }
+    if (sc.shadows.length && sc.closeness > 0 && !reduce) busy = true; // eyes sway
+    if (sc.pulse > 0) {
+      sc.pulse = Math.max(0, sc.pulse - dt / (reduce ? 650 : 380));
+      busy = true;
+    }
+
     // Ice trail fades from the tail.
     if (sc.trail.length) {
       for (const q of sc.trail) q.life -= dt;
@@ -603,6 +731,9 @@ const EVENT_SFX: Partial<Record<PlayEvent["type"], Sfx>> = {
   swirl: "swirl",
   unswirl: "unswirl",
   hurt: "hurt",
+  shadowTouch: "shadowHit",
+  shadowStunned: "shadowStun",
+  waited: "tap",
   dimmed: "dim",
   darkness: "darkness",
   burnout: "burnout",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUp, EyeOff, Flame, FlipHorizontal2, Gamepad2, Heart, LifeBuoy, RotateCw, Star, VenetianMask, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUp, EyeOff, Flame, FlipHorizontal2, Gamepad2, Ghost, Heart, Hourglass, LifeBuoy, RotateCw, Star, VenetianMask, X } from "lucide-react";
 import {
   DIFFICULTIES,
   type Dir,
@@ -58,6 +58,8 @@ const KEYMAP: Record<string, Dir> = {
   ArrowDown: 2, KeyS: 2,
   ArrowLeft: 3, KeyA: 3,
 };
+/** «Esperar» (only where La Sombra roams). */
+const WAIT_KEYS = new Set(["Space", "KeyE"]);
 const PAD_KEY = "laberinto.dpad.v1";
 const SWIPE_PX = 22;
 
@@ -152,7 +154,7 @@ export function ExplorerView({
         const text = message(e, s);
         if (text) {
           const bad =
-            e.type === "fell" || e.type === "locked" || e.type === "hurt" || e.type === "darkness" || e.type === "defeat" || e.type === "dimmed" || e.type === "trialFail";
+            e.type === "fell" || e.type === "locked" || e.type === "hurt" || e.type === "shadowTouch" || e.type === "darkness" || e.type === "defeat" || e.type === "dimmed" || e.type === "trialFail";
           const good =
             e.type === "key" ||
             e.type === "star" ||
@@ -162,6 +164,7 @@ export function ExplorerView({
             e.type === "seal" ||
             e.type === "heal" ||
             e.type === "emergencyExit" ||
+            e.type === "shadowStunned" ||
             (e.type === "uncurse" && e.cured);
           setToast({ text, id: ++toastId, tone: bad ? "bad" : good ? "good" : "info" });
         }
@@ -213,6 +216,11 @@ export function ExplorerView({
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (WAIT_KEYS.has(e.code) && !e.metaKey && !e.ctrlKey && !e.altKey && !(e.target instanceof HTMLButtonElement)) {
+        e.preventDefault();
+        if (!e.repeat) ctrlRef.current?.wait();
+        return;
+      }
       const d = KEYMAP[e.code];
       if (d === undefined || e.metaKey || e.ctrlKey || e.altKey) return;
       e.preventDefault();
@@ -337,6 +345,7 @@ export function ExplorerView({
                 <Candle light={hud.light} radius={hud.radius} reduce={reduce} />
               </>
             )}
+            {hud.hasShadow && !masked && <ShadowChip heat={hud.heat} reduce={reduce} />}
             {emblems.length > 0 && !masked && (
               <Chip label={`Sellos: ${sealCount(hud.state)} de ${emblems.length}`} className={sealCount(hud.state) === emblems.length ? "bg-[#6b4a0c]/90" : undefined}>
                 {emblems.map((em, i) => (
@@ -434,6 +443,18 @@ export function ExplorerView({
           </div>
         )}
 
+        {hud?.hasShadow && !overlay && !hud.lost && !hud.arrived && (
+          <div className="absolute bottom-4 left-3 sm:left-4" onPointerDown={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => ctrlRef.current?.wait()}
+              aria-label="Esperar un instante en el mismo sitio (tecla Espacio o E)"
+              className="flex h-12 min-w-12 items-center justify-center gap-2 rounded-full bg-black/55 px-4 text-sm font-medium text-white shadow-lg backdrop-blur-sm active:bg-black/75"
+            >
+              <Hourglass size={20} aria-hidden /> Esperar
+            </button>
+          </div>
+        )}
+
         {pad && !overlay && <DPad ctrl={ctrlRef} />}
       </div>
 
@@ -501,6 +522,32 @@ function CurseKindIcon({ kind }: { kind: CurseKind }) {
       <CurseIcon size={22} />
       <Icon size={11} className="absolute -bottom-0.5 -right-0.5 rounded-full bg-[#5b2fa0]" />
     </span>
+  );
+}
+
+const HEAT_WORDS = ["no se oye nada", "se oye lejos", "se oye cerca", "se oye muy cerca"];
+
+/**
+ * La Sombra's presence as a pulse, never as a position or a name: three dots
+ * fill as it gets near and the icon beats faster (CSS, off with reduced
+ * motion — the dots still say it). Silent for people without sound.
+ */
+function ShadowChip({ heat, reduce }: { heat: number; reduce: boolean }) {
+  const level = heat <= 0 ? 0 : heat < 0.34 ? 1 : heat < 0.67 ? 2 : 3;
+  return (
+    <Chip label={`La Sombra: ${HEAT_WORDS[level]}`} className={level === 3 ? "bg-[#2a1840]/92" : level > 0 ? "bg-[#1a1228]/85" : undefined}>
+      <Ghost
+        size={16}
+        aria-hidden
+        className={cn(level > 0 ? "text-[#d9ccff]" : "text-white/45", !reduce && level > 0 && "shadow-beat")}
+        style={!reduce && level > 0 ? { animationDuration: `${Math.round(1300 - 870 * heat)}ms` } : undefined}
+      />
+      <span className="flex gap-0.5" aria-hidden>
+        {[1, 2, 3].map((r) => (
+          <span key={r} className={cn("h-1.5 w-1.5 rounded-full", r <= level ? "bg-[#c5b6ff]" : "bg-white/25")} />
+        ))}
+      </span>
+    </Chip>
   );
 }
 

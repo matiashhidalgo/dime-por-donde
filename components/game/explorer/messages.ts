@@ -1,4 +1,5 @@
 import { DIFFICULTIES, type Game, type PlayEvent, type PlayState } from "@/src/engine";
+import { lines as shared } from "@/lib/lines";
 
 /**
  * What the explorer reads after each event: warm, teasing lines that rotate
@@ -17,18 +18,44 @@ const CURSE_LINES: Record<keyof typeof CURSE_NAME, string[]> = {
   mirror: ["¡Maldición de espejo! Tu mundo está al revés, izquierda con derecha.", "Maldición: ahora vives en el espejo. Tu guía no."],
 };
 
+const SHADOW_TOUCH_OPEN = [
+  "¡Algo frío te rozó!",
+  "¡Te alcanzó la Sombra!",
+  "Un escalofrío por la espalda: era ella.",
+  "¡Contacto! Ese frío no era del laberinto.",
+  "Se te cruzó la Sombra y no pidió permiso.",
+  "¡Brrr! Te tocó un pedazo de oscuridad.",
+  "Chocaste con la Sombra de frente.",
+  "Algo sin nombre pasó por donde estabas.",
+  "¡Ay! La Sombra no sabe lo que es el espacio personal.",
+];
+
+const SHADOW_TOUCH_TAIL = [
+  "La vela tembló y perdiste un corazón.",
+  "Perdiste un corazón y un poco de luz.",
+  "Te cuesta un corazón y media llama.",
+  "La luz se encogió y el corazón también.",
+  "Un corazón menos y la vela hecha un flan.",
+  "Se llevó un corazón y algo de vela de recuerdo.",
+  "Tu vela sufrió y tu corazón ni se diga.",
+];
+
+const SHADOW_STUN = [
+  "¡La luz la dejó tiesa! Unos pasos de respiro.",
+  "El farol la encandiló: se quedó quieta un rato.",
+  "¡Flash! La Sombra se congeló. Aprovechen.",
+  "La Sombra parpadeó y se quedó clavada. Camina rápido.",
+  "Con tanta luz no se puede ni moverse: ya tienes ventaja.",
+  "La Sombra odia las luces fuertes. Y tú acabas de encender una.",
+  "Se quedó atontada. No lo desperdicien.",
+  "El farol la paró en seco. Ahora, ¡a pasar!",
+  "Se le apagaron los ojos un momento. Tu guía dirá por dónde.",
+];
+
 export type Messenger = (e: PlayEvent, s: PlayState) => string | null;
 
 export function createMessenger(game: Game): Messenger {
-  const last = new Map<string, number>();
-  const pick = (kind: string, lines: string[]): string => {
-    if (lines.length === 1) return lines[0];
-    const prev = last.get(kind) ?? -1;
-    let i = Math.floor(Math.random() * (lines.length - 1));
-    if (i >= prev && prev >= 0) i++;
-    last.set(kind, i);
-    return lines[i];
-  };
+  const pick = (kind: string, pool: string[]): string => shared.pick(kind, pool);
   const maxStars = DIFFICULTIES[game.level].stars;
   const hearts = (n: number) => (n === 1 ? "Te queda 1 corazón" : `Te quedan ${n} corazones`);
   let sealLine = "";
@@ -63,7 +90,7 @@ export function createMessenger(game: Game): Messenger {
         ]);
       }
       case "hurt":
-        if (e.cause === "pit" || s.lost) return null;
+        if (e.cause === "pit" || e.cause === "shadow" || s.lost) return null;
         if (e.cause === "trial") {
           return pick("trial-hurt", [
             `Tanto error ya dolió: perdiste un corazón. ${hearts(s.hearts)}.`,
@@ -74,6 +101,11 @@ export function createMessenger(game: Game): Messenger {
           `Demasiado tiempo a oscuras: perdiste un corazón. La vela se volvió a encender, a medias. ${hearts(s.hearts)}.`,
           `Te tropezaste en la oscuridad. ${hearts(s.hearts)}. La vela revive… por ahora.`,
         ]);
+      case "shadowTouch":
+        if (s.lost) return null; // the defeat line covers it
+        return shared.combo("shadow-touch", SHADOW_TOUCH_OPEN, [`${hearts(s.hearts)}.`, ...SHADOW_TOUCH_TAIL.map((t) => `${t} ${hearts(s.hearts)}.`)]);
+      case "shadowStunned":
+        return shared.pick("shadow-stun", SHADOW_STUN);
       case "dimmed":
         if (e.radius >= 2) return pick("dim2", ["La vela baja. Ya ves menos lejos.", "La llama se encoge. Pídele a tu guía la luz más cercana."]);
         return pick("dim1", ["Queda poquita luz. Busquen una vela o un farol, ya.", "La vela tiembla. Esto se va a poner oscuro."]);
