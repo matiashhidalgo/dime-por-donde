@@ -31,6 +31,7 @@ import { CURSE_NAME, createMessenger } from "./messages";
 import { CureOverlay, CurseIcon } from "./cure-overlay";
 import type { Ending } from "../screens/result";
 import { StationOverlay } from "./station-overlay";
+import { FirstHint } from "../hint";
 
 /**
  * The explorer's screen: Canvas 2.5D maze in fog + a quiet HTML HUD (hearts,
@@ -440,6 +441,12 @@ export function ExplorerView({
               <Medallion d={emblems[hud.station].d} sealed={false} size={34} className="text-white/85" />
               Abrir la estación
             </button>
+          </div>
+        )}
+
+        {hud?.hasShadow && !overlay && !hud.lost && !hud.arrived && (
+          <div className="absolute inset-x-3 top-14 z-10 mx-auto max-w-md sm:top-16" onPointerDown={(e) => e.stopPropagation()}>
+            <FirstHint id="shadow-explorer" />
           </div>
         )}
 

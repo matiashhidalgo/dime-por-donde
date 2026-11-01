@@ -28,6 +28,7 @@ import { Button } from "../ui";
 import { PianoListen, PianoPlay } from "../piano";
 import { TangramBoard, TangramSilhouette } from "../tangram";
 import { Feedback, Medallion, SEAL_GOLD, Shape, TRIAL_TITLES, useShake } from "../trials";
+import { FirstHint } from "../hint";
 
 /**
  * The explorer's side of a station (GAME_SPEC_V2.md anexo etapa 2). Opens on
@@ -92,6 +93,7 @@ export function StationOverlay({
         </header>
 
         <div ref={shakeRef} className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
+          {!sealed && <FirstHint id={`trial-${station.kind}`} className="mb-3" />}
           {sealed ? (
             <SealWon emblem={emblem} count={state.seals} reduce={reduce} onClose={onClose} />
           ) : station.kind === "lock" ? (

@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "../ui";
 import { Shape, useShake } from "../trials";
 import { CURSE_NAME } from "./messages";
+import { FirstHint } from "../hint";
 
 /**
  * The explorer's side of a cure (GAME_SPEC_V2.md anexo etapa 3). What they
@@ -85,6 +86,7 @@ export function CureOverlay({
         </header>
 
         <div ref={shakeRef} className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
+          <FirstHint id="cure" className="mb-3" />
           {curse.cure === "sigil" ? <SigilView game={game} k={curse.k} paper={pal.paper} ink={pal.ink} /> : <EchoView game={game} k={curse.k} paper={pal.paper} ink={pal.ink} reduce={reduce} />}
 
           <label htmlFor="cure-key" className="mt-5 block text-sm font-medium">Clave de la cura</label>

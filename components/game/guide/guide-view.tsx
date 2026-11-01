@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "../ui";
 import { describeCell } from "./describe";
 import { Legend } from "./legend";
+import { FirstHint } from "../hint";
 import { SoundToggle } from "../sound-toggle";
 import { CELL, MARK_COLOR, MapArt, PIN_COLOR } from "./map-art";
 
@@ -499,6 +500,12 @@ export function GuideView({
               </div>
               <div className="pointer-events-none absolute left-0 top-0 bg-card" style={{ width: RULER, height: RULER }} />
             </>
+          )}
+
+          {game.shadow && (
+            <div className="absolute inset-x-3 bottom-3 z-10 mx-auto max-w-md" onPointerDown={(e) => e.stopPropagation()}>
+              <FirstHint id="shadow-guide" />
+            </div>
           )}
 
           {/* Floating zoom controls */}

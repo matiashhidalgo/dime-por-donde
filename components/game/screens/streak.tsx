@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { type Session, type StreakInfo, sealOf } from "../session";
 import { Button, Card, Screen } from "../ui";
 import { EmergencyHatch, ENDING_TITLE, type Ending, type ExpeditionEnd } from "./result";
+import { FirstHint } from "../hint";
 
 /**
  * Racha screens (GAME_SPEC_V2.md anexo etapa 3). The explorer's device is the
@@ -124,6 +125,7 @@ function RelayShow({ streakCode, relay, onAccept }: { streakCode: string; relay:
           <KeyRound size={18} /> Clave de relevo
         </p>
         <p className="mt-1 text-sm text-muted">Díctasela a tu pareja de a tres letras. Con ella, su pantalla sabe cómo siguen.</p>
+        <FirstHint id="relay" className="mt-3 text-left" />
         <p className="mt-4 flex justify-center gap-2 font-mono text-3xl font-semibold tracking-[0.12em] sm:gap-3 sm:text-4xl sm:tracking-[0.18em]" aria-label={`Clave ${code.split("").join(" ")}`}>
           {groups.map((g, i) => (
             <span key={i} className="rounded-2xl bg-background px-2.5 py-2 sm:px-3">
@@ -180,6 +182,7 @@ function RelayEntry({ session, guess, onAccept }: { session: Session; guess: End
           <KeyRound size={18} /> Clave de relevo
         </label>
         <p className="mt-1 text-sm text-muted">Pídele a tu pareja la clave que ve en su pantalla. Son {RELAY_KEY_LENGTH} letras, de a tres.</p>
+        <FirstHint id="relay" className="mt-3" />
         <div className="mt-3 flex gap-2">
           <input
             id="relay-key"
