@@ -20,6 +20,7 @@ import {
 } from "./place";
 import { type Rng, createRng, hashString } from "./rng";
 import { routeDecisions, routeEffort, solve } from "./solver";
+import { withStations } from "./stations";
 import { THEMES, THEME_IDS, type ThemeId } from "./themes";
 import type { Game, GameStats } from "./types";
 
@@ -48,6 +49,15 @@ type AttemptResult = { ok: true; game: Game } | { ok: false; reason: string };
 
 export function generateGame(input: GenerateInput): Game {
   const version = input.version ?? GENERATOR_VERSION;
+  // v2 = the frozen v1 map + 3 sealed stations on their own RNG stream. A map
+  // that can't host stations safely is skipped for the next seed variant.
+  if (version === 2) {
+    for (let variant = 0; ; variant++) {
+      const seed = variant === 0 ? input.seed : `${input.seed}~${variant}`;
+      const game = withStations({ ...generateGame({ ...input, seed, version: 1 }), version: 2 });
+      if (game) return game;
+    }
+  }
   if (version !== 1) throw new Error(`generator v${version} not available`);
   const failures: Record<string, number> = {};
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -74,6 +84,8 @@ export function gamesForCode(code: string | GameCode): Game[] {
   } else {
     info = code;
   }
+  // v2 reuses the «duo» header for Racha: its maps come from streakGame (streak.ts).
+  if (info.mode === "duo" && info.version >= 2) throw new Error("streak code: build its maps with streakGame");
   if (info.mode !== "duo") return [generateGame({ seed: info.seed, level: info.mode, version: info.version })];
   const themes = createRng(`v${info.version}|duo|${info.seed}|themes`).shuffle(THEME_IDS);
   return LEVELS.map((level, i) =>
@@ -251,6 +263,9 @@ export function fingerprint(game: Game): string {
     game.swirls.map((s) => `${s.cell}${s.axes}${s.steps}`).join(","),
     game.portals.map((p) => `${p.a}-${p.b}-${p.symbol}`).join(","),
     game.landmarks.map((l) => `${l.cell}:${l.label}`).join(","),
+    // v2+ only, so v1 fingerprints (golden) are untouched.
+    ...(game.stations ? [game.stations.map((s) => `${s.cell}${s.kind}${s.direction}`).join(",")] : []),
+    ...(game.streak ? [`streak${game.streak.index}`] : []),
   ].join("|");
   const h1 = hashString(parts).toString(16).padStart(8, "0");
   const h2 = hashString(`salt:${parts}`).toString(16).padStart(8, "0");

@@ -3,21 +3,29 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   BookOpen,
+  DoorOpen,
+  Flag,
   Hand,
   Highlighter,
+  HeartCrack,
+  LifeBuoy,
   LocateFixed,
   MapPin,
   Minus,
-  PartyPopper,
   PenLine,
   Plus,
   Undo2,
   X,
 } from "lucide-react";
 import { type Game, THEMES, cellLabel, columnLabel } from "@/src/engine";
+import type { Ending } from "../screens/result";
+import { SEAL_GOLD } from "../trials";
+import { StationSheet, StationsBar, useGuideStations } from "./stations";
+import { CurseSheet } from "./curses";
+import { CurseIcon } from "../explorer/cure-overlay";
 import { audio, buzz } from "@/lib/audio";
-import { formatTime, useElapsed } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
+import { Button } from "../ui";
 import { describeCell } from "./describe";
 import { Legend } from "./legend";
 import { SoundToggle } from "../sound-toggle";
@@ -25,7 +33,8 @@ import { CELL, MARK_COLOR, MapArt, PIN_COLOR } from "./map-art";
 
 /**
  * The guide's screen: full map with pan / zoom / pinch, sticky coordinate
- * rulers, local notes (pin, marks, pencil) with undo, timer and "¡Llegó!".
+ * rulers, local notes (pin, marks, pencil) with undo, and "Terminar", where
+ * the guide says how it ended (no clock in v2: the guide only hears it).
  */
 
 type Tool = "pan" | "pin" | "mark" | "draw";
@@ -33,7 +42,6 @@ interface View { s: number; tx: number; ty: number }
 interface Notes { marks: number[]; strokes: number[][]; pin: number | null }
 const EMPTY: Notes = { marks: [], strokes: [], pin: null };
 const RULER = 22;
-const LABELS_FROM_PX = 50; // cell size on screen at which landmark names appear
 
 type Gesture =
   | { kind: "pan"; x0: number; y0: number; view0: View; moved: boolean }
@@ -47,15 +55,14 @@ export function GuideView({
   game,
   title,
   startedAt,
-  timed,
-  onArrived,
+  onEnd,
   onQuit,
 }: {
   game: Game;
   title: string;
   startedAt: number;
-  timed: boolean;
-  onArrived: (ms: number) => void;
+  /** The explorer said how it ended: all seals, the emergency exit, or out of hearts. */
+  onEnd: (ending: Ending, ms: number) => void;
   onQuit: () => void;
 }) {
   const g = game.grid;
@@ -80,9 +87,15 @@ export function GuideView({
   const [selected, setSelected] = useState<number | null>(null);
   const [focusPulse, setFocusPulse] = useState<number | null>(null);
   const [legendOpen, setLegendOpen] = useState(false);
-  const [confirmArrive, setConfirmArrive] = useState(false);
-
-  const elapsed = useElapsed(startedAt, null);
+  const [ending, setEnding] = useState(false);
+  const { stations: stationNotes, update: updateStation } = useGuideStations(game);
+  const [openStation, setOpenStation] = useState<number | null>(null);
+  const [cursesOpen, setCursesOpen] = useState(false);
+  // Phones start with the stations folded: unfolded, they cover the map.
+  const [stationsOpen, setStationsOpen] = useState(false);
+  useEffect(() => {
+    if (window.matchMedia("(min-width: 1024px)").matches) setStationsOpen(true);
+  }, []);
 
   // ── Layout & fitting ──
   const fitView = useCallback((w: number, h: number): View => {
@@ -321,23 +334,18 @@ export function GuideView({
     gesture.current = null;
   };
 
-  // ── Arrive (two taps so a stray touch can't end the game) ──
-  useEffect(() => {
-    if (!confirmArrive) return;
-    const t = window.setTimeout(() => setConfirmArrive(false), 3500);
-    return () => window.clearTimeout(t);
-  }, [confirmArrive]);
-  const arrive = () => {
-    if (!confirmArrive) {
-      setConfirmArrive(true);
-      buzz(15);
-      audio.play("tap");
-      return;
-    }
-    buzz([30, 60, 30]);
-    audio.play("win");
-    onArrived(Date.now() - startedAt);
+  // ── End: the explorer says how it went; the guide confirms it here ──
+  const finish = (ending: Ending) => {
+    buzz(ending === "lost" ? [120, 80, 200] : [30, 60, 30]);
+    audio.play(ending === "won" ? "win" : ending === "escaped" ? "emergency" : "defeat");
+    onEnd(ending, Date.now() - startedAt);
   };
+  useEffect(() => {
+    if (!ending) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setEnding(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ending]);
 
   // Same soft ambience as the explorer hears, for the same theme.
   useEffect(() => {
@@ -358,7 +366,6 @@ export function GuideView({
     return () => window.removeEventListener("keydown", onKey);
   }, [zoomAt, size]);
 
-  const showLabels = !!view && view.s * CELL >= LABELS_FROM_PX;
   const cellPx = view ? view.s * CELL : 0;
   const pinCell = notes.pin;
   const pinPos = pinDrag ?? (pinCell !== null ? { x: (pinCell % g.width) * CELL + CELL / 2, y: Math.floor(pinCell / g.width) * CELL + CELL / 2 } : null);
@@ -381,12 +388,6 @@ export function GuideView({
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{title}</p>
           <p className="truncate text-xs text-muted">Guía · el inicio es la E</p>
-        </div>
-        <div
-          className={cn("rounded-xl px-3 py-1.5 font-mono text-lg tabular-nums", timed ? "bg-background" : "text-sm text-muted")}
-          aria-label={timed ? `Tiempo ${formatTime(elapsed)}` : "Sin tiempo"}
-        >
-          {timed ? formatTime(elapsed) : "sin tiempo"}
         </div>
         <button
           onClick={() => setLegendOpen((o) => !o)}
@@ -413,7 +414,12 @@ export function GuideView({
           {view && (
             <svg className="absolute inset-0 h-full w-full" role="img" aria-label="Mapa del laberinto">
               <g style={{ transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.s})`, transformOrigin: "0 0", transition: animate ? "transform 320ms cubic-bezier(.2,.8,.2,1)" : "none" }}>
-                <MapArt game={game} showLabels={showLabels} />
+                <MapArt game={game} />
+                {game.stations?.map((st, i) =>
+                  stationNotes[i]?.marked ? (
+                    <circle key={`seal${i}`} cx={(st.cell % g.width) * CELL + CELL / 2} cy={Math.floor(st.cell / g.width) * CELL + CELL / 2} r={CELL * 0.5} fill="none" stroke={SEAL_GOLD} strokeWidth={4} />
+                  ) : null,
+                )}
 
                 {/* Notes */}
                 {notes.marks.map((c) => (
@@ -502,6 +508,27 @@ export function GuideView({
             <RoundBtn label="Ver todo el mapa" onClick={() => { setAnimate(true); setView(fitView(size.w, size.h)); }}><LocateFixed size={20} /></RoundBtn>
           </div>
 
+          {/* Stations: the three emblems */}
+          {game.stations && (
+            <div className="absolute left-[calc(22px+0.5rem)] top-[calc(22px+0.5rem)] flex max-h-[calc(100%-22px-1rem)] flex-col items-start gap-2 overflow-y-auto">
+              <StationsBar game={game} notes={stationNotes} open={stationsOpen} onToggle={() => setStationsOpen((o) => !o)} onOpen={setOpenStation} />
+              {game.version >= 2 && (
+                <button
+                  onClick={() => {
+                    audio.play("tap");
+                    setCursesOpen(true);
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  aria-haspopup="dialog"
+                  className="flex min-h-11 items-center gap-1.5 rounded-full bg-card/95 px-3 text-[10px] font-semibold uppercase tracking-widest text-muted shadow-md ring-1 ring-border hover:bg-card"
+                >
+                  <CurseIcon size={16} />
+                  Maldiciones
+                </button>
+              )}
+            </div>
+          )}
+
           {/* What's on the tapped cell */}
           {selected !== null && (
             <div className="pointer-events-none absolute inset-x-3 bottom-3 flex justify-center">
@@ -556,22 +583,58 @@ export function GuideView({
           </button>
         </div>
         <button
-          onClick={arrive}
-          className={cn(
-            "ml-auto flex h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-2xl px-3 font-semibold transition-colors sm:max-w-56 sm:flex-none sm:px-5",
-            confirmArrive ? "bg-accent-2 text-white" : "bg-accent text-accent-ink",
-          )}
+          onClick={() => {
+            audio.play("tap");
+            setEnding(true);
+          }}
+          aria-haspopup="dialog"
+          className="ml-auto flex h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-2xl bg-accent px-3 font-semibold text-accent-ink sm:max-w-56 sm:flex-none sm:px-5"
         >
-          <PartyPopper size={20} className="shrink-0" />
-          {confirmArrive ? (
-            <span className="truncate">
-              ¿Seguro?<span className="hidden sm:inline"> Toca otra vez</span>
-            </span>
-          ) : (
-            <span className="truncate">¡Llegó!</span>
-          )}
+          <Flag size={20} className="shrink-0" />
+          <span className="truncate">Terminar</span>
         </button>
       </footer>
+
+      {openStation !== null && game.stations && (
+        <StationSheet
+          game={game}
+          station={game.stations[openStation]}
+          note={stationNotes[openStation]}
+          update={(f) => updateStation(openStation, f)}
+          onFocus={(c) => {
+            setOpenStation(null);
+            focusCell(c);
+          }}
+          onClose={() => setOpenStation(null)}
+        />
+      )}
+
+      {cursesOpen && <CurseSheet game={game} onClose={() => setCursesOpen(false)} />}
+
+      {ending && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center" onClick={() => setEnding(false)}>
+          <div role="dialog" aria-modal="true" aria-labelledby="end-title" className="w-full max-w-sm rounded-3xl bg-card p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h2 id="end-title" className="font-display text-2xl">¿Cómo terminó?</h2>
+            <p className="mt-2 text-sm text-muted">Pregúntale a tu pareja qué ve en su pantalla.</p>
+            <div className="mt-6 grid gap-3">
+              <Button size="lg" onClick={() => finish("won")} autoFocus>
+                <DoorOpen size={20} /> {game.stations ? "Escaparon con los 3 sellos" : "Escaparon"}
+              </Button>
+              {game.stations && (
+                <Button size="lg" variant="secondary" onClick={() => finish("escaped")}>
+                  <LifeBuoy size={20} /> Salida de emergencia
+                </Button>
+              )}
+              <Button size="lg" variant="secondary" onClick={() => finish("lost")}>
+                <HeartCrack size={20} /> Atrapados: sin corazones
+              </Button>
+              <Button variant="ghost" onClick={() => setEnding(false)}>
+                Seguir jugando
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

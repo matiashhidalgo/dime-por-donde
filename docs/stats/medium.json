@@ -1,7 +1,7 @@
 {
   "level": "medium",
   "games": 2000,
-  "msPerGame": 2.4,
+  "msPerGame": 4.6,
   "attempts": {
     "min": 0,
     "p5": 0,
@@ -11,87 +11,87 @@
     "mean": 0.1
   },
   "retryReasons": {
-    "route-long": 70,
-    "no-portal-spot": 27,
-    "few-pits": 30,
+    "route-long": 71,
+    "no-portal-spot": 26,
+    "few-pits": 28,
     "few-checkpoints": 11,
     "route-short": 22,
-    "doors-break-route": 26,
+    "doors-break-route": 27,
     "key-unreachable": 2
   },
   "algorithms": {
-    "prim": 704,
-    "mixed": 699,
-    "backtracker": 597
+    "prim": 724,
+    "mixed": 700,
+    "backtracker": 576
   },
   "themes": {
-    "desert": 497,
-    "ice": 513,
-    "forest": 509,
-    "cave": 481
+    "desert": 501,
+    "ice": 506,
+    "forest": 514,
+    "cave": 479
   },
   "obstacleTypes": {
     "pits": 2000,
-    "ice": 1229,
-    "doors": 1232,
-    "portals": 1278,
+    "ice": 1204,
+    "doors": 1238,
+    "portals": 1292,
     "swirls": 1283
   },
   "plainPath": {
     "min": 13,
     "p5": 33,
     "p50": 54,
-    "p95": 121,
+    "p95": 120,
     "max": 195,
-    "mean": 62.3
+    "mean": 61.7
   },
   "solutionMoves": {
     "min": 27,
     "p5": 36,
-    "p50": 68,
+    "p50": 67,
     "p95": 132,
     "max": 179,
-    "mean": 74
+    "mean": 73.2
   },
   "routeDecisions": {
     "min": 5,
-    "p5": 10,
+    "p5": 11,
     "p50": 21,
     "p95": 35,
     "max": 54,
-    "mean": 21.6
+    "mean": 21.7
   },
   "effort": {
     "min": 60,
     "p5": 72,
     "p50": 110,
-    "p95": 183,
+    "p95": 182,
     "max": 210,
-    "mean": 117.3
+    "mean": 116.7
   },
   "deadEnds": {
     "min": 13,
     "p5": 20,
-    "p50": 37,
+    "p50": 38,
     "p95": 73,
     "max": 95,
-    "mean": 41.6
+    "mean": 41.9
   },
   "junctions": {
     "min": 30,
     "p5": 40,
-    "p50": 72,
+    "p50": 73,
     "p95": 113,
     "max": 127,
-    "mean": 76.2
+    "mean": 76.6
   },
   "loops": {
     "min": 3,
     "p5": 9,
     "p50": 24,
-    "p95": 42,
+    "p95": 43,
     "max": 54,
-    "mean": 24.5
+    "mean": 24.6
   },
   "pits": {
     "min": 7,
@@ -128,10 +128,10 @@
   "iceCells": {
     "min": 0,
     "p5": 0,
-    "p50": 12,
+    "p50": 9,
     "p95": 24,
     "max": 24,
-    "mean": 10.1
+    "mean": 9.8
   },
   "swirls": {
     "min": 0,
@@ -159,10 +159,10 @@
   },
   "statesExplored": {
     "min": 173,
-    "p5": 266,
-    "p50": 417,
+    "p5": 267,
+    "p50": 429,
     "p95": 1164,
     "max": 1260,
-    "mean": 519.6
+    "mean": 522.2
   }
 }

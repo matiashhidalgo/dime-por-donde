@@ -38,7 +38,8 @@ function keyBits(world: World): number {
   return bits;
 }
 
-export function solve(world: World, start: number, exit: number): SolveResult {
+/** `startKeys` (default none) lets a simulation re-plan mid-round while holding keys. */
+export function solve(world: World, start: number, exit: number, startKeys = 0): SolveResult {
   const cells = world.grid.width * world.grid.height;
   const masks = 1 << keyBits(world);
   const total = cells * masks;
@@ -50,7 +51,7 @@ export function solve(world: World, start: number, exit: number): SolveResult {
   const edgesTo: number[] = [];
   const reachable = new Uint8Array(cells);
 
-  const startMask = keyColorAt(world, start) >= 0 ? 1 << keyColorAt(world, start) : 0;
+  const startMask = ((keyColorAt(world, start) >= 0 ? 1 << keyColorAt(world, start) : 0) | startKeys) & (masks - 1);
   const s0 = start * masks + startMask;
   seen[s0] = 1;
   order.push(s0);

@@ -8,7 +8,7 @@
  * - Volumes are deliberately low: this plays next to a video call.
  * - Suspends while the tab is hidden.
  */
-import type { ThemeId } from "@/src/engine";
+import type { PianoTimbre, ThemeId } from "@/src/engine";
 import { readJSON, writeJSON } from "./storage";
 
 export type SoundMode = "all" | "sfx" | "off";
@@ -21,17 +21,32 @@ export type Sfx =
   | "key"
   | "star"
   | "lantern"
-  | "checkpoint"
   | "portal"
   | "appear"
   | "fall"
   | "swirl"
   | "unswirl"
   | "win"
-  | "tick"
-  | "go"
+  | "hurt"
+  | "dim"
+  | "darkness"
+  | "burnout"
+  | "candle"
+  | "defeat"
   | "pin"
-  | "tap";
+  | "tap"
+  | "click"
+  | "bzzt"
+  | "seal"
+  | "exitOpen"
+  | "curse"
+  | "cure"
+  | "relay"
+  | "emergency"
+  | "streakEnd"
+  | "snap"
+  | "turn"
+  | "lift";
 
 const MODE_KEY = "laberinto.sound.v1";
 const MASTER = 0.8;
@@ -328,10 +343,6 @@ class AudioEngine {
         [67, 71, 74, 79].forEach((m) => this.tone(hz(m), t, 1.2, { type: "triangle", gain: 0.035, attack: 0.25, echo: 0.2 }));
         this.tone(hz(91), t + 0.3, 0.6, { gain: 0.03, echo: 0.4 });
         break;
-      case "checkpoint":
-        this.arp([76, 81], t, 0.12, { type: "triangle", gain: 0.09, len: 0.45, echo: 0.3 });
-        this.noise(t, 0.18, { type: "bandpass", freq: 900, q: 0.8, gain: 0.03 });
-        break;
       case "portal":
         this.tone(260, t, 0.4, { gain: 0.08, to: 1250, vibrato: 30, echo: 0.4 });
         this.noise(t, 0.4, { type: "bandpass", freq: 500, to: 3500, q: 3, gain: 0.04 });
@@ -340,9 +351,11 @@ class AudioEngine {
         this.tone(1100, t, 0.3, { gain: 0.06, to: 520, vibrato: 20, echo: 0.3 });
         break;
       case "fall":
-        this.tone(760, t, 0.5, { type: "triangle", gain: 0.1, to: 110 });
-        this.tone(70, t + 0.48, 0.25, { gain: 0.2, to: 45 });
-        this.noise(t + 0.48, 0.22, { type: "lowpass", freq: 500, gain: 0.08 });
+        // A long whistle down (it's a far fall now), then the landing.
+        this.tone(900, t, 0.9, { type: "triangle", gain: 0.1, to: 90 });
+        this.noise(t, 0.9, { type: "bandpass", freq: 2200, to: 400, q: 2, gain: 0.04 });
+        this.tone(70, t + 0.88, 0.3, { gain: 0.22, to: 42 });
+        this.noise(t + 0.88, 0.25, { type: "lowpass", freq: 500, gain: 0.09 });
         break;
       case "swirl":
         this.tone(520, t, 0.6, { type: "triangle", gain: 0.06, to: 300, vibrato: 90 });
@@ -357,11 +370,36 @@ class AudioEngine {
         this.arp([96, 100, 103, 108], t + 0.55, 0.08, { gain: 0.025, len: 0.3, echo: 0.5 });
         break;
       }
-      case "tick":
-        this.tone(660, t, 0.14, { gain: 0.1 });
+      case "hurt":
+        // A heavy heartbeat thud with a sour minor second on top.
+        this.tone(62, t, 0.22, { gain: 0.24, to: 40 });
+        this.tone(58, t + 0.24, 0.3, { gain: 0.2, to: 38 });
+        this.tone(hz(70), t + 0.05, 0.5, { type: "sawtooth", gain: 0.022, to: hz(68) });
+        this.tone(hz(71), t + 0.05, 0.5, { type: "sawtooth", gain: 0.018, to: hz(69) });
         break;
-      case "go":
-        [76, 83, 88].forEach((m) => this.tone(hz(m), t, 0.5, { type: "triangle", gain: 0.07, echo: 0.3 }));
+      case "dim":
+        // The flame gutters: a breathy flutter going down.
+        this.noise(t, 0.35, { type: "bandpass", freq: 1400, to: 500, q: 2, gain: 0.035 });
+        this.tone(hz(76), t, 0.4, { type: "triangle", gain: 0.02, to: hz(72) });
+        break;
+      case "darkness":
+        this.noise(t, 0.6, { type: "lowpass", freq: 900, to: 120, gain: 0.06 });
+        this.tone(hz(52), t + 0.1, 1.4, { type: "triangle", gain: 0.05, attack: 0.3, vibrato: 3, echo: 0.4 });
+        break;
+      case "burnout":
+        // A puff of smoke and a match re-striking.
+        this.noise(t, 0.4, { type: "lowpass", freq: 700, to: 150, gain: 0.08 });
+        this.noise(t + 0.5, 0.12, { type: "highpass", freq: 3500, gain: 0.05 });
+        this.noise(t + 0.55, 0.5, { type: "bandpass", freq: 900, q: 0.8, gain: 0.04 });
+        break;
+      case "candle":
+        this.noise(t, 0.4, { type: "bandpass", freq: 1100, q: 0.8, gain: 0.035 });
+        this.arp([74, 79], t + 0.05, 0.1, { type: "triangle", gain: 0.06, len: 0.5, echo: 0.3 });
+        break;
+      case "defeat":
+        // Sad trombone, but small.
+        [[67, 0], [66, 0.32], [65, 0.64]].forEach(([m, d]) => this.tone(hz(m), t + d, 0.32, { type: "sawtooth", gain: 0.035, vibrato: 2 }));
+        this.tone(hz(64), t + 0.96, 1.1, { type: "sawtooth", gain: 0.04, to: hz(62), vibrato: 6 });
         break;
       case "pin":
         this.tone(940, t, 0.06, { gain: 0.06, to: 620 });
@@ -369,6 +407,206 @@ class AudioEngine {
       case "tap":
         this.tone(520, t, 0.04, { gain: 0.04 });
         break;
+      case "click":
+        // A tumbler dropping into place.
+        this.noise(t, 0.03, { type: "highpass", freq: 2600, gain: 0.07 });
+        this.tone(1900, t, 0.03, { type: "square", gain: 0.015 });
+        this.tone(180, t + 0.01, 0.05, { gain: 0.08, to: 120 });
+        break;
+      case "bzzt":
+        // Wrong: a short buzzer, more grumpy than mean.
+        this.tone(110, t, 0.28, { type: "sawtooth", gain: 0.05, vibrato: 18 });
+        this.tone(116, t, 0.28, { type: "square", gain: 0.025 });
+        this.noise(t, 0.2, { type: "bandpass", freq: 300, q: 3, gain: 0.03 });
+        break;
+      case "seal":
+        // A heavy stamp, then a bright chime.
+        this.tone(80, t, 0.25, { gain: 0.22, to: 48 });
+        this.noise(t, 0.12, { type: "lowpass", freq: 900, gain: 0.08 });
+        this.arp([79, 84, 88, 91], t + 0.16, 0.07, { type: "triangle", gain: 0.08, len: 0.5, echo: 0.4 });
+        this.tone(hz(96), t + 0.45, 0.9, { gain: 0.03, echo: 0.5 });
+        break;
+      case "exitOpen":
+        // Stone grinding, then the way out rings.
+        this.noise(t, 0.9, { type: "bandpass", freq: 260, to: 140, q: 4, gain: 0.08 });
+        this.tone(55, t, 0.9, { gain: 0.12, to: 45 });
+        [67, 74, 79, 86].forEach((m, i) => this.tone(hz(m), t + 0.8 + i * 0.09, 1.3, { type: "triangle", gain: 0.04, attack: 0.04, echo: 0.4 }));
+        break;
+      case "curse":
+        // A tritone that sags, with a whispery rush under it.
+        this.tone(hz(62), t, 0.9, { type: "sawtooth", gain: 0.03, to: hz(58), vibrato: 7 });
+        this.tone(hz(68), t + 0.04, 0.85, { type: "triangle", gain: 0.045, to: hz(64), vibrato: 5, echo: 0.35 });
+        this.noise(t, 0.7, { type: "bandpass", freq: 1800, to: 600, q: 2.5, gain: 0.035 });
+        break;
+      case "cure":
+        // The knot loosens: a falling sigh, then a clean major arpeggio.
+        this.noise(t, 0.3, { type: "bandpass", freq: 900, to: 2400, q: 1.5, gain: 0.03 });
+        this.arp([74, 78, 81, 86], t + 0.12, 0.07, { type: "triangle", gain: 0.07, len: 0.45, echo: 0.4 });
+        break;
+      case "relay":
+        // A baton changing hands: two knocks and a rising fifth.
+        this.tone(170, t, 0.08, { gain: 0.14, to: 120 });
+        this.tone(200, t + 0.12, 0.08, { gain: 0.14, to: 140 });
+        this.arp([72, 79], t + 0.26, 0.1, { type: "triangle", gain: 0.07, len: 0.5, echo: 0.3 });
+        break;
+      case "emergency":
+        // A hatch creaks open and everyone squeezes out.
+        this.noise(t, 0.5, { type: "bandpass", freq: 520, to: 320, q: 5, gain: 0.06 });
+        this.tone(hz(67), t + 0.4, 0.25, { type: "triangle", gain: 0.06 });
+        this.tone(hz(74), t + 0.62, 0.6, { type: "triangle", gain: 0.06, echo: 0.3 });
+        break;
+      case "snap":
+        // A tile settling on the board: a dry wooden knock.
+        this.tone(330, t, 0.06, { type: "triangle", gain: 0.09, to: 220 });
+        this.noise(t, 0.04, { type: "bandpass", freq: 1800, q: 2, gain: 0.05 });
+        break;
+      case "turn":
+        // A quarter turn: a quick ratchet.
+        this.noise(t, 0.025, { type: "highpass", freq: 3000, gain: 0.05 });
+        this.noise(t + 0.045, 0.025, { type: "highpass", freq: 3400, gain: 0.05 });
+        this.tone(700, t, 0.08, { gain: 0.03, to: 900 });
+        break;
+      case "lift":
+        this.tone(420, t, 0.07, { gain: 0.04, to: 560 });
+        break;
+      case "streakEnd":
+        // A small fanfare that runs out of breath.
+        this.arp([72, 76, 79], t, 0.12, { type: "triangle", gain: 0.07, len: 0.35, echo: 0.3 });
+        this.tone(hz(84), t + 0.4, 0.9, { type: "triangle", gain: 0.05, to: hz(79), vibrato: 4, echo: 0.4 });
+        break;
+    }
+  }
+
+  // ───────────────────────────────────────────── the witch's piano
+
+  private melodyBus: GainNode | null = null;
+
+  /** Whether notes can sound at all here (sound not off, WebAudio present). */
+  canPlayNotes(): boolean {
+    if (typeof window === "undefined" || this.mode === "off") return false;
+    return !!(window.AudioContext ?? (window as unknown as { webkitAudioContext?: unknown }).webkitAudioContext);
+  }
+
+  /**
+   * Plays a melody (MIDI notes, durations in beats). Call from a gesture.
+   * Starting another one cuts the previous; music ducks meanwhile. Returns
+   * its length in seconds, or 0 when it can't sound.
+   */
+  playMelody(notes: readonly { midi: number; beats: number }[], beat: number, timbre: PianoTimbre): number {
+    this.unlock();
+    if (!this.ctx || !this.canPlayNotes()) return 0;
+    const ctx = this.ctx;
+    this.stopMelody();
+    const bus = ctx.createGain();
+    bus.connect(this.sfxBus);
+    this.melodyBus = bus;
+    let at = ctx.currentTime + 0.08;
+    const start = at;
+    for (const n of notes) {
+      this.voice(hz(n.midi), at, n.beats * beat, timbre, bus);
+      at += n.beats * beat;
+    }
+    const length = at - start + 0.4;
+    this.musicBus.gain.cancelScheduledValues(ctx.currentTime);
+    this.musicBus.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.08);
+    if (this.music) this.musicBus.gain.setTargetAtTime(MUSIC, ctx.currentTime + length, 0.6);
+    return length;
+  }
+
+  /** One key of the keyboard. */
+  playKey(midi: number, timbre: PianoTimbre, beats = 1, beat = 0.42): void {
+    this.unlock();
+    if (!this.ctx || !this.canPlayNotes()) return;
+    this.voice(hz(midi), this.ctx.currentTime + 0.01, beats * beat, timbre, this.sfxBus);
+  }
+
+  stopMelody(): void {
+    const bus = this.melodyBus;
+    if (!bus || !this.ctx) return;
+    this.melodyBus = null;
+    const t = this.ctx.currentTime;
+    bus.gain.setTargetAtTime(0.0001, t, 0.03);
+    window.setTimeout(() => bus.disconnect(), 300);
+    if (this.music) this.musicBus.gain.setTargetAtTime(MUSIC, t + 0.2, 0.6);
+  }
+
+  /** A synthesized note in one of the five timbres. */
+  private voice(f: number, at: number, dur: number, timbre: PianoTimbre, bus: AudioNode): void {
+    const ctx = this.ctx!;
+    const out = ctx.createGain();
+    out.connect(bus);
+    const osc = (type: Wave, freq: number, gain: number, stopAt: number) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = type;
+      o.frequency.value = freq;
+      g.gain.value = gain;
+      o.connect(g).connect(out);
+      o.start(at);
+      o.stop(stopAt + 0.05);
+      return o;
+    };
+    const env = (peak: number, attack: number, end: number, sustainTo = 0.0001) => {
+      out.gain.setValueAtTime(0.0001, at);
+      out.gain.linearRampToValueAtTime(peak, at + attack);
+      out.gain.exponentialRampToValueAtTime(Math.max(0.0001, sustainTo), end);
+    };
+    switch (timbre) {
+      case "bell": {
+        const end = at + Math.max(1.1, dur);
+        env(0.16, 0.005, end);
+        osc("sine", f, 1, end);
+        osc("sine", f * 2.76, 0.25, at + 0.4);
+        osc("sine", f * 5.4, 0.08, at + 0.15);
+        break;
+      }
+      case "flute": {
+        const end = at + dur * 0.95;
+        out.gain.setValueAtTime(0.0001, at);
+        out.gain.linearRampToValueAtTime(0.13, at + 0.07);
+        out.gain.setValueAtTime(0.11, Math.max(at + 0.08, end - 0.08));
+        out.gain.exponentialRampToValueAtTime(0.0001, end + 0.06);
+        const o = osc("triangle", f, 1, end + 0.06);
+        const lfo = ctx.createOscillator();
+        const depth = ctx.createGain();
+        lfo.frequency.value = 5;
+        depth.gain.value = f * 0.006;
+        lfo.connect(depth).connect(o.frequency);
+        lfo.start(at);
+        lfo.stop(end + 0.1);
+        osc("sine", f * 2, 0.12, end + 0.06);
+        break;
+      }
+      case "pluck": {
+        const end = at + Math.max(0.5, dur * 1.2);
+        const lp = ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.setValueAtTime(f * 8, at);
+        lp.frequency.exponentialRampToValueAtTime(f * 1.5, end);
+        out.disconnect();
+        out.connect(lp).connect(bus);
+        env(0.12, 0.004, end);
+        osc("sawtooth", f, 1, end);
+        break;
+      }
+      case "wood": {
+        const end = at + 0.45;
+        env(0.2, 0.003, end);
+        osc("sine", f, 1, end);
+        osc("sine", f * 4, 0.18, at + 0.08);
+        break;
+      }
+      case "organ": {
+        const end = at + dur * 0.92;
+        out.gain.setValueAtTime(0.0001, at);
+        out.gain.linearRampToValueAtTime(0.06, at + 0.02);
+        out.gain.setValueAtTime(0.06, Math.max(at + 0.03, end - 0.05));
+        out.gain.exponentialRampToValueAtTime(0.0001, end + 0.05);
+        osc("square", f, 0.5, end + 0.05);
+        osc("sine", f * 2, 0.6, end + 0.05);
+        osc("sine", f / 2, 0.5, end + 0.05);
+        break;
+      }
     }
   }
 

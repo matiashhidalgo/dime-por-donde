@@ -1,72 +1,94 @@
 /**
- * Difficulty calibration report: `npx vite-node scripts/calibrate.ts [seeds]`.
+ * Balance report for the v2 expedition rules: `npm run calibrate [seeds] [sweep]`.
  *
- * Generates N games per level and prints what a round costs the pair: route
- * length, decisions, pits that sit beside the route (each one = a warning the
- * guide has to give), detour to grab every star, the current par time and an
- * estimate of real play time under a talking-pace model (see PACE below).
+ * Plays N Difícil v2 maps (3 stations + trials) with three simulated pairs (src/engine/simulate.ts:
+ * competent, normal, scatterbrained) and prints how often each escapes, the
+ * hearts they keep, falls, burnouts and moves. With `sweep`, it also tries a
+ * grid of candle settings so you can see what moving a knob in
+ * src/engine/tuning.ts would do. With `streak`, it plays N streaks per pair
+ * instead and prints how many maps each lasts. Deterministic: same seeds →
+ * same report.
  */
-import { DIFFICULTIES, LEVELS, SLOW_FACTOR, bfsMulti, degree, generateGame, isOpen, neighbor, parSeconds, solve } from "../src/engine";
-import type { Dir } from "../src/engine";
+import { PROFILES, TUNING, createRng, generateGame, simulatePair, simulateStreak } from "../src/engine";
+import type { Game, PairProfile } from "../src/engine";
 
-const N = Number(process.argv[2] ?? 400);
+const N = Number(process.argv[2] ?? 300);
+const SWEEP = process.argv.includes("sweep");
+const STREAK = process.argv.includes("streak");
 
-/**
- * Talking-pace model (assumption, not measured): walking a cell while
- * narrating ≈1.6 s; every junction on the route ≈11 s of "what do you see /
- * go left"; every pit next to the route ≈4 s of warning; ~40 s to orient at the
- * start; 1.25× for wrong turns and backtracking.
- */
-const PACE = { move: 1.6, decision: 11, pitWarning: 4, start: 40, wander: 1.25 };
+const games: Game[] = STREAK ? [] : Array.from({ length: N }, (_, i) => generateGame({ seed: `cal${i}`, level: "hard" }));
 
-type Row = Record<string, number>;
-const q = (xs: number[], p: number) => {
+const median = (xs: number[]) => {
   const s = [...xs].sort((a, b) => a - b);
-  return s[Math.min(s.length - 1, Math.floor(p * s.length))];
+  return s.length ? s[Math.floor(s.length / 2)] : 0;
 };
+const pct = (x: number) => `${Math.round(100 * x)} %`.padStart(5);
 
-for (const level of LEVELS) {
-  const rows: Row[] = [];
-  for (let i = 0; i < N; i++) {
-    const game = generateGame({ seed: `cal${i}`, level, version: 1 });
-    const sol = solve(game, game.start, game.exit);
-    const route = new Set(sol.route);
-    let pitsNear = 0;
-    for (const p of game.pits) {
-      for (const d of [0, 1, 2, 3] as Dir[]) {
-        if (isOpen(game.grid, p, d) && route.has(neighbor(game.grid, p, d))) {
-          pitsNear++;
-          break;
-        }
+function run(p: PairProfile) {
+  const rows = games.map((g, i) => simulatePair(g, p, createRng(`sim:${p.name}:${i}`)));
+  const wins = rows.filter((r) => r.won);
+  const losses = rows.filter((r) => !r.won);
+  return {
+    win: wins.length / rows.length,
+    heartsOnWin: wins.reduce((a, r) => a + r.hearts, 0) / Math.max(1, wins.length),
+    flawless: wins.filter((r) => r.hearts === TUNING.hearts).length / rows.length,
+    falls: rows.reduce((a, r) => a + r.falls, 0) / rows.length,
+    burnouts: rows.reduce((a, r) => a + r.burnouts, 0) / rows.length,
+    lossByDark: losses.filter((r) => r.burnouts > 0).length / Math.max(1, losses.length),
+    moves: median(rows.map((r) => r.moves)),
+    seals: rows.reduce((a, r) => a + r.seals, 0) / rows.length,
+    trialPaid: rows.reduce((a, r) => a + r.trialPaid, 0) / rows.length,
+    escaped: rows.filter((r) => r.escaped).length / rows.length,
+    curses: rows.reduce((a, r) => a + r.curses, 0) / rows.length,
+    pianoSecs: median(rows.flatMap((r) => r.trialSecs.piano)),
+    tangramSecs: median(rows.flatMap((r) => r.trialSecs.tangram)),
+  };
+}
+
+function report(label: string) {
+  console.log(`\n${label}`);
+  console.log("pareja        gana  ♥ al ganar  sin daño  caídas  apagones  derrotas con apagón  movs (mediana)  sellos  fallos pagados  emergencia  maldiciones  piano s  tangram s");
+  for (const p of PROFILES) {
+    const r = run(p);
+    console.log(
+      `${p.name.padEnd(12)} ${pct(r.win)}  ${r.heartsOnWin.toFixed(2).padStart(10)}  ${pct(r.flawless)}  ${r.falls.toFixed(2).padStart(6)}  ${r.burnouts.toFixed(2).padStart(8)}  ${pct(r.lossByDark).padStart(19)}  ${String(r.moves).padStart(14)}  ${r.seals.toFixed(2).padStart(6)}  ${r.trialPaid.toFixed(2).padStart(14)}  ${pct(r.escaped).padStart(10)}  ${r.curses.toFixed(2).padStart(11)}  ${String(r.pianoSecs).padStart(7)}  ${String(r.tangramSecs).padStart(9)}`,
+    );
+  }
+}
+
+if (STREAK) {
+  const q = (xs: number[], f: number) => [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(xs.length * f))];
+  const st = TUNING.streak;
+  console.log(
+    `${N} rachas por pareja · pozos ${st.pits.atStart} al inicio, +${st.pits.perMap}/mapa (tope +${st.pits.cap}) · vela ×${st.candleStart} −${st.candleShrink}/nivel (piso ${st.candleFloor}) · huida +${st.escapeBump} niveles · ♥ cada ${st.healEvery} sellos`,
+  );
+  console.log("pareja        mapas (mediana)  p25  p75  media  sellos/racha  huidas/racha  ≥5 mapas");
+  for (const p of PROFILES) {
+    const rows = Array.from({ length: N }, (_, i) => simulateStreak(`rac${i}`, p, createRng(`streak:${p.name}:${i}`)));
+    const maps = rows.map((r) => r.maps);
+    const mean = (f: (r: (typeof rows)[0]) => number) => (rows.reduce((a, r) => a + f(r), 0) / rows.length).toFixed(2);
+    console.log(
+      `${p.name.padEnd(12)} ${String(median(maps)).padStart(16)}  ${String(q(maps, 0.25)).padStart(3)}  ${String(q(maps, 0.75)).padStart(3)}  ${mean((r) => r.maps).padStart(5)}  ${mean((r) => r.seals).padStart(12)}  ${mean((r) => r.escapes).padStart(12)}  ${pct(rows.filter((r) => r.maps >= 5).length / rows.length).padStart(8)}`,
+    );
+  }
+  process.exit(0);
+}
+
+const candle = TUNING.candle as { -readonly [K in keyof typeof TUNING.candle]: (typeof TUNING.candle)[K] };
+console.log(
+  `${N} mapas Difícil v2 · corazones ${TUNING.hearts} · vela ${candle.max} · vela chica +${candle.candleRefill} · margen oscuro ${candle.darkGrace} · sello +${TUNING.seal.candleRefill} vela, ♥ cada ${TUNING.seal.healEvery} · fallo −${TUNING.trials.failLight} vela, ♥ cada ${TUNING.trials.heartEvery}`,
+);
+report("Configuración actual (src/engine/tuning.ts)");
+
+if (SWEEP) {
+  const base = { ...candle };
+  for (const max of [60, 80, 100]) {
+    for (const relight of [0.4, 0.6]) {
+      for (const darkGrace of [6, 10]) {
+        Object.assign(candle, { max, relight, darkGrace });
+        report(`vela ${max} · reencendido ${relight} · margen oscuro ${darkGrace}`);
       }
     }
-    const fromRoute = bfsMulti(game.grid, sol.route);
-    const starDetour = game.stars.reduce((sum, s) => sum + 2 * Math.max(0, fromRoute[s]), 0);
-    const decisions = game.stats.routeDecisions;
-    const moves = sol.moves;
-    const est =
-      (PACE.start + PACE.move * (moves + starDetour) + PACE.decision * decisions + PACE.pitWarning * pitsNear) * PACE.wander;
-    rows.push({
-      moves,
-      decisions,
-      effort: game.stats.effort,
-      pits: game.pits.length,
-      pitsNearRoute: pitsNear,
-      starDetour,
-      junctionShare: sol.route.filter((c) => degree(game.grid, c) >= 3).length / sol.route.length,
-      parMin: parSeconds(game) / 60,
-      estMin: est / 60,
-      estOverPar: est / parSeconds(game),
-    });
   }
-  const keys = Object.keys(rows[0]);
-  console.log(`\n${DIFFICULTIES[level].name} (${N} partidas)`);
-  console.log("                 p5      p50     p95");
-  for (const k of keys) {
-    const xs = rows.map((r) => r[k]);
-    const f = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(2)).padStart(8);
-    console.log(`${k.padEnd(15)}${f(q(xs, 0.05))}${f(q(xs, 0.5))}${f(q(xs, 0.95))}`);
-  }
-  const slow = rows.filter((r) => r.estOverPar > SLOW_FACTOR).length;
-  console.log(`estimado > ${SLOW_FACTOR}×par (pierde ★ por tiempo): ${((100 * slow) / N).toFixed(0)} %`);
+  Object.assign(candle, base);
 }

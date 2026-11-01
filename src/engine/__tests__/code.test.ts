@@ -3,6 +3,7 @@ import {
   CODE_ALPHABET,
   CODE_LENGTH,
   CODE_MODES,
+  GENERATOR_VERSION,
   createCode,
   encodeCode,
   formatCode,
@@ -36,7 +37,7 @@ describe("encode / parse", () => {
         expect(code).toHaveLength(CODE_LENGTH);
         const parsed = parseCode(code);
         expect(parsed.ok).toBe(true);
-        if (parsed.ok) expect(parsed.value).toEqual({ code, version: 1, mode, seed });
+        if (parsed.ok) expect(parsed.value).toEqual({ code, version: GENERATOR_VERSION, mode, seed });
       }
     }
   });
@@ -94,8 +95,8 @@ describe("encode / parse", () => {
   });
 
   it("rejects codes from a future generator version", () => {
-    // Header index 4 = version 2, easy. Build a valid checksum by hand.
-    const body = CODE_ALPHABET[4] + "ABCDEF";
+    // Header index = (version - 1) × 4 + mode: the first version after this one, easy.
+    const body = CODE_ALPHABET[GENERATOR_VERSION * 4] + "ABCDEF";
     let sum = 0;
     for (let i = 0; i < body.length; i++) sum += (i + 1) * CODE_ALPHABET.indexOf(body[i]);
     const parsed = parseCode(body + CODE_ALPHABET[sum % 29]);

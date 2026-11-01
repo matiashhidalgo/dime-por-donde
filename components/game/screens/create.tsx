@@ -1,17 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import type { CodeMode } from "@/src/engine";
+import { Flame, Mountain } from "lucide-react";
 import type { Role } from "@/lib/history";
-import { Button, Card, ChoiceGroup, Screen, TopBar } from "../ui";
-import { RoleField, TimedField } from "./setup-fields";
+import { cn } from "@/lib/utils";
+import { Button, Card, Screen, TopBar } from "../ui";
+import { RoleField } from "./setup-fields";
 
 export interface CreateChoice {
-  mode: CodeMode;
   role: Role;
-  timed: boolean;
+  /** «Racha»: maps in a row until the hearts run out, roles swapping each map. */
+  streak: boolean;
 }
 
+/** v2: one Difícil expedition («Partida única») or a «Racha»; and your role (on the first map, for a Racha). */
 export function CreateScreen({
   initial,
   onBack,
@@ -22,30 +24,48 @@ export function CreateScreen({
   onCreate: (c: CreateChoice) => void;
 }) {
   const [choice, setChoice] = useState(initial);
-  const set = (patch: Partial<CreateChoice>) => setChoice((c) => ({ ...c, ...patch }));
+  const kinds = [
+    { streak: false, icon: Mountain, title: "Partida única", text: "Un mapa, tres sellos y la salida." },
+    { streak: true, icon: Flame, title: "Racha", text: "Mapa tras mapa con los mismos corazones. Cambian de rol en cada uno." },
+  ];
   return (
     <Screen>
-      <TopBar title="Nueva partida" onBack={onBack} />
+      <TopBar title="Nueva expedición" onBack={onBack} />
       <Card className="space-y-6">
-        <ChoiceGroup
-          label="Dificultad"
-          value={choice.mode}
-          onChange={(mode) => set({ mode })}
-          options={[
-            { value: "easy", title: "Fácil", hint: "12×12 · para calentar" },
-            { value: "medium", title: "Medio", hint: "18×18 · ya en serio" },
-            { value: "hard", title: "Difícil", hint: "26×26 · sin piedad" },
-            { value: "duo", title: "Dúo", hint: "3 rondas, cambian roles" },
-          ]}
-        />
-        <RoleField value={choice.role} onChange={(role) => set({ role })} />
-        <TimedField value={choice.timed} onChange={(timed) => set({ timed })} />
+        <fieldset>
+          <legend className="mb-2 text-sm font-medium">¿Qué juegan?</legend>
+          <div role="radiogroup" className="grid gap-2 sm:grid-cols-2">
+            {kinds.map((k) => {
+              const on = choice.streak === k.streak;
+              const Icon = k.icon;
+              return (
+                <button
+                  key={k.title}
+                  role="radio"
+                  aria-checked={on}
+                  onClick={() => setChoice((c) => ({ ...c, streak: k.streak }))}
+                  className={cn(
+                    "flex min-h-11 items-start gap-3 rounded-2xl border-2 p-3 text-left transition-colors",
+                    on ? "border-foreground bg-foreground/5" : "border-border hover:bg-border/30",
+                  )}
+                >
+                  <Icon size={22} className="mt-0.5 shrink-0" />
+                  <span>
+                    <span className="block font-medium">{k.title}</span>
+                    <span className="block text-sm text-muted">{k.text}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
+        <RoleField value={choice.role} onChange={(role) => setChoice((c) => ({ ...c, role }))} />
       </Card>
       <Button size="lg" className="mt-6 w-full" onClick={() => onCreate(choice)}>
         Crear código
       </Button>
       <p className="mt-3 text-center text-sm text-muted">
-        Tu pareja va a necesitar el rol contrario. El cronómetro lo elige cada quien.
+        Tu pareja va a necesitar el rol contrario{choice.streak ? " en el primer mapa" : ""}.
       </p>
     </Screen>
   );

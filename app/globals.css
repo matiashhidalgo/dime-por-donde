@@ -72,20 +72,46 @@ body {
   }
 }
 
-/* Explorer HUD: event toasts and the "+10 s" penalty pop. */
+/* Explorer HUD: event toasts, a heart breaking, the candle guttering. */
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(-6px) scale(0.97); }
   to { opacity: 1; transform: none; }
 }
-@keyframes penalty-pop {
-  0% { opacity: 0; transform: translateY(-4px); }
-  15% { opacity: 1; transform: none; }
-  80% { opacity: 1; }
-  100% { opacity: 0; transform: translateY(4px); }
+@keyframes heart-lost {
+  0% { transform: scale(1.6); opacity: 1; }
+  30% { transform: scale(0.8) rotate(-12deg); }
+  60% { transform: scale(1.1) rotate(8deg); }
+  100% { transform: none; }
 }
+@keyframes candle-gutter {
+  0%, 100% { opacity: 1; }
+  40% { opacity: 0.55; }
+  55% { opacity: 0.9; }
+  70% { opacity: 0.45; }
+}
+@keyframes seal-pop {
+  0% { transform: scale(0.3) rotate(-30deg); opacity: 0; }
+  60% { transform: scale(1.15) rotate(6deg); opacity: 1; }
+  100% { transform: none; }
+}
+@keyframes seal-spark {
+  from { transform: rotate(var(--a)) translateY(0) scale(1); opacity: 1; }
+  to { transform: rotate(var(--a)) translateY(-70px) scale(0.3); opacity: 0; }
+}
+@keyframes wrong-shake {
+  0%, 100% { transform: none; }
+  20% { transform: translateX(-7px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(2px); }
+}
+.seal-pop { animation: seal-pop 520ms cubic-bezier(.2,.9,.3,1.2); }
+.seal-spark { animation: seal-spark 800ms ease-out forwards; }
+.wrong-shake { animation: wrong-shake 360ms ease-out; }
 .toast-in { animation: toast-in 180ms ease-out; }
-.penalty-pop { animation: penalty-pop 1.6s ease-out forwards; }
+.heart-lost { animation: heart-lost 700ms ease-out; }
+.candle-gutter { animation: candle-gutter 1.3s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .toast-in { animation: none; }
-  .penalty-pop { animation-duration: 0.01s; animation-delay: 1.5s; }
+  .toast-in, .heart-lost, .candle-gutter, .seal-pop, .wrong-shake { animation: none; }
+  .seal-spark { display: none; }
 }

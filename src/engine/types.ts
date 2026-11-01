@@ -120,6 +120,26 @@ export interface GameStats {
   statesExplored: number;
 }
 
+export type TrialKind = "figures" | "lock" | "piano" | "tangram";
+
+/**
+ * A v2 station: a seal behind a cooperative trial. Everything about the trial
+ * (figures, glyphs, clues, keys) derives from `key`, so it differs per game.
+ */
+export interface Station {
+  index: number;
+  cell: number;
+  kind: TrialKind;
+  /**
+   * Who acts. A: the explorer has the information (sees, hears) and the guide
+   * acts on their own device, then dictates a seal key. B: the reverse; the
+   * explorer's answer opens the seal directly. The lock is always "A" and
+   * ignores it (its lights live on the explorer's side).
+   */
+  direction: "A" | "B";
+  key: string;
+}
+
 export interface Game {
   version: number;
   level: Level;
@@ -142,6 +162,10 @@ export interface Game {
   stars: number[];
   lanterns: number[];
   landmarks: Landmark[];
+  /** v2+: the 3 sealed stations (absent on v1 games: just reach the exit). */
+  stations?: Station[];
+  /** Streak maps only: which map of the streak this is (its MAP level). */
+  streak?: { index: number };
   solution: Solution;
   stats: GameStats;
 }

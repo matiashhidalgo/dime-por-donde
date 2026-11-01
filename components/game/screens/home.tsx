@@ -1,11 +1,14 @@
 "use client";
 
-import { Compass, History, KeyRound, Map as MapIcon, RotateCcw, Sparkles } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Compass, Flame, History, KeyRound, Map as MapIcon, RotateCcw, Sparkles } from "lucide-react";
+import { bestStreak } from "@/lib/history";
 import { DecorMaze } from "../decor-maze";
 import { SoundToggle } from "../sound-toggle";
 import { Button, Card, Screen } from "../ui";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { SITE } from "@/lib/site";
+import { TUNING } from "@/src/engine";
 
 export interface ResumeOffer {
   label: string;
@@ -24,6 +27,8 @@ export function HomeScreen({
   onHistory: () => void;
   resume?: ResumeOffer | null;
 }) {
+  const [best, setBest] = useState(0);
+  useEffect(() => setBest(bestStreak()), []);
   return (
     <Screen>
       <header className="flex min-h-12 items-center justify-between">
@@ -48,7 +53,7 @@ export function HomeScreen({
         <Card className="mt-8 border-accent/40">
           <p className="font-medium">Tenías una partida en curso</p>
           <p className="mt-0.5 text-sm text-muted">{resume.label}</p>
-          <p className="mt-2 text-sm text-muted">El reloj sigue desde donde iba. Si eras explorador, vuelves a la entrada.</p>
+          <p className="mt-2 text-sm text-muted">Si eras explorador, vuelves a la entrada del mapa con los corazones con que lo empezaron.</p>
           <div className="mt-4 grid grid-cols-2 gap-2">
             <Button variant="secondary" onClick={resume.onDiscard}>
               Descartar
@@ -71,6 +76,11 @@ export function HomeScreen({
           <History size={18} /> Historial
         </Button>
       </div>
+      {best > 0 && (
+        <p className="mt-2 flex items-center justify-center gap-1.5 text-sm text-muted">
+          <Flame size={16} /> Su mejor racha: {best === 1 ? "1 mapa" : `${best} mapas`}
+        </p>
+      )}
 
       <Card className="mt-8">
         <h2 className="font-display text-xl">Cómo se juega</h2>
@@ -88,7 +98,10 @@ export function HomeScreen({
           </li>
           <li className="flex gap-3">
             <Step n={3} />
-            <span>Hablen hasta llegar a la salida. Bonus: recojan las estrellas.</span>
+            <span>
+              Hablen hasta escapar. Tienen {TUNING.hearts} corazones compartidos: los pozos y quedarse a oscuras cuestan uno. La vela del explorador se gasta al
+              caminar; los faroles y las velas del camino la recargan. Bonus: recojan las estrellas.
+            </span>
           </li>
         </ol>
       </Card>

@@ -5,9 +5,9 @@ import { AlertTriangle, CheckCircle2, History } from "lucide-react";
 import { CODE_LENGTH, parseCode } from "@/src/engine";
 import { type Role, ROLE_NAME, lastPlayed } from "@/lib/history";
 import { cn } from "@/lib/utils";
-import { MODE_NAME } from "../session";
+import { LEGACY_MODE_NAME } from "../session";
 import { Button, Card, Screen, TopBar } from "../ui";
-import { RoleField, TimedField } from "./setup-fields";
+import { RoleField } from "./setup-fields";
 
 /** Formats raw typing as "ABCD-EFGH" while keeping the caret natural. */
 function pretty(raw: string): string {
@@ -24,11 +24,10 @@ export function JoinScreen({
   prefill?: string;
   replay?: boolean;
   onBack: () => void;
-  onJoin: (code: string, role: Role, timed: boolean) => void;
+  onJoin: (code: string, role: Role) => void;
 }) {
   const [text, setText] = useState(pretty(prefill ?? ""));
   const [role, setRole] = useState<Role>("explorer");
-  const [timed, setTimed] = useState(true);
 
   const raw = text.replace(/-/g, "");
   const parsed = useMemo(() => (raw ? parseCode(raw) : null), [raw]);
@@ -71,8 +70,14 @@ export function JoinScreen({
           {valid && (
             <p className="flex items-start gap-2 text-accent-2">
               <CheckCircle2 size={18} className="mt-px shrink-0" />
-              Código válido · {MODE_NAME[valid.mode]}
+              Código válido
+              {valid.mode !== "hard" && ` · código anterior (${LEGACY_MODE_NAME[valid.mode]}), se juega con las reglas nuevas`}
               {parsed?.ok && parsed.corrected && " (corregí V→B / N→M)"}
+            </p>
+          )}
+          {valid && valid.version === 1 && (
+            <p className="mt-2 rounded-xl bg-background/70 p-3 text-muted">
+              Es un código de antes de las estaciones: esta partida no tiene sellos, solo lleguen a la salida.
             </p>
           )}
           {!error && !valid && <p className="text-muted">8 caracteres. No importan mayúsculas ni guiones.</p>}
@@ -88,10 +93,9 @@ export function JoinScreen({
 
       <Card className="mt-4 space-y-6">
         <RoleField value={role} onChange={setRole} />
-        <TimedField value={timed} onChange={setTimed} />
       </Card>
 
-      <Button size="lg" className="mt-6 w-full" disabled={!valid} onClick={() => valid && onJoin(valid.code, role, timed)}>
+      <Button size="lg" className="mt-6 w-full" disabled={!valid} onClick={() => valid && onJoin(valid.code, role)}>
         Entrar
       </Button>
     </Screen>

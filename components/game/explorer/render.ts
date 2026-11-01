@@ -1,25 +1,24 @@
 import {
-  DIFFICULTIES,
   type Dir,
   type Game,
   KEY_COLORS,
-  type Landmark,
   PIT_KNOWN,
   PORTAL_SYMBOLS,
   type Palette,
   type PlayState,
   type Shape,
   THEMES,
+  exitOpen,
   isOpen,
-  keyName,
-  doorName,
-  portalName,
+  stationEmblems,
 } from "@/src/engine";
 import { SWIRL_COLOR } from "../guide/map-art";
+import { landmarkShapes } from "../landmark-shapes";
 
 /**
  * Explorer view renderer: oblique top-down 2.5D on Canvas 2D. Up is up, like
  * the guide's map; walls stand toward the viewer with a darker front face.
+ * No words anywhere: things are told apart by shape and color only (v2).
  * Stateless: draws whatever Scene it's given. Everything is drawn in CSS
  * pixels (the caller sets the DPR transform), and only cells inside the
  * camera and not fully fogged are touched.
@@ -67,8 +66,6 @@ export interface Scene {
   /** Displayed visibility per cell, eased toward `target`. */
   vis: Float32Array;
   target: Float32Array;
-  /** 1 where the cell is in sight right now (labels only show there). */
-  inSight: Uint8Array;
   cam: { x: number; y: number };
   tile: number;
   width: number;
@@ -82,16 +79,20 @@ export interface Scene {
   /** 0..1 strength of the inverted-controls effect. */
   invertFx: number;
   invertBoth: boolean;
-  /** 0..1 strength of the lantern light. */
-  lanternFx: number;
+  /** Sight radius in cells, eased toward the candle's (0 = darkness). */
+  sightFx: number;
+  /** 0..1 candle left, eased: drives the glow around the explorer. */
+  lightFx: number;
+  /** 0..1 red flash after losing a heart. */
+  hurtFx: number;
   /** Items grouped by row for back-to-front drawing. */
   rows: RowItem[][];
-  fonts: { ui: string; display: string };
 }
 
 export type RowItem =
   | { kind: "occ"; cell: number }
-  | { kind: "landmark"; cell: number; landmark: Landmark };
+  | { kind: "landmark"; cell: number; index: number }
+  | { kind: "station"; cell: number; index: number };
 
 /** Per-theme look of slippery floor (desert ice is slick sand). */
 const SLICK: Record<string, { base: string; streak: string; trail: string }> = {
@@ -104,7 +105,6 @@ const SLICK: Record<string, { base: string; streak: string; trail: string }> = {
 const START_COLOR = "#3d9a5f";
 /** The explorer's body color: warm and high-contrast on each theme's floor. */
 const HERO: Record<string, string> = { forest: "#e8735a", cave: "#f2a65a", ice: "#ef6f6c", desert: "#2f9c8f" };
-const FLAG_COLOR = "#e9a23b";
 const STAR_FILL = "#f2b84b";
 const STAR_EDGE = "#a5700f";
 
@@ -113,7 +113,8 @@ export function buildRows(game: Game): RowItem[][] {
   game.occupant.forEach((o, c) => {
     if (o && o.type !== "pit") rows[Math.floor(c / game.grid.width)].push({ kind: "occ", cell: c });
   });
-  for (const l of game.landmarks) rows[Math.floor(l.cell / game.grid.width)].push({ kind: "landmark", cell: l.cell, landmark: l });
+  game.landmarks.forEach((l, index) => rows[Math.floor(l.cell / game.grid.width)].push({ kind: "landmark", cell: l.cell, index }));
+  game.stations?.forEach((st) => rows[Math.floor(st.cell / game.grid.width)].push({ kind: "station", cell: st.cell, index: st.index }));
   return rows;
 }
 
@@ -199,18 +200,22 @@ export function draw(ctx: CanvasRenderingContext2D, sc: Scene): void {
   // ── Floor decals: start pad, portals, swirls, exit light, player shadow.
   for (let y = y0; y <= y1; y++) {
     for (const item of sc.rows[y]) {
-      if (item.kind !== "occ") continue;
+      if (item.kind === "landmark") continue;
       const c = item.cell;
       const a = vis[c];
       if (a < 0.01) continue;
-      const o = game.occupant[c]!;
       const cx = ox + (c % g.width) * T + T / 2;
       const cy = oy + y * T + T / 2;
       ctx.globalAlpha = a;
+      if (item.kind === "station") {
+        drawStationPlate(ctx, cx, cy, T, (sc.state.seals & (1 << item.index)) !== 0, sc.time);
+        continue;
+      }
+      const o = game.occupant[c]!;
       if (o.type === "start") drawStartPad(ctx, cx, cy, T);
       else if (o.type === "portal") drawPortal(ctx, cx, cy, T, game.portals[o.pair].symbol, sc.time);
       else if (o.type === "swirl") drawSwirl(ctx, cx, cy, T, game.swirls[o.index].axes === "xy", sc.time);
-      else if (o.type === "exit") drawExitLight(ctx, cx, cy, T, pal, sc.time);
+      else if (o.type === "exit" && exitOpen(game, sc.state)) drawExitLight(ctx, cx, cy, T, pal, sc.time);
     }
   }
   // Ice trail: two thin runner lines that fade from the tail.
@@ -275,22 +280,27 @@ export function draw(ctx: CanvasRenderingContext2D, sc: Scene): void {
       const cx = ox + (item.cell % g.width) * T + T / 2;
       const cy = oy + y * T + T / 2;
       ctx.globalAlpha = a;
-      if (item.kind === "landmark") drawLandmark(ctx, cx, cy, T, item.landmark, pal);
+      if (item.kind === "landmark") drawLandmark(ctx, sc, item.index, cx, cy, T);
+      else if (item.kind === "station") drawStation(ctx, sc, item.index, cx, cy, T);
       else drawThing(ctx, sc, item.cell, cx, cy, T, wallH, thick);
     }
     if (y === playerRow && p.alpha > 0.01) drawPlayer(ctx, psx, psy, T, p, HERO[game.theme] ?? pal.accent, sc.time);
   }
 
-  // ── Light: warm glow around the explorer, then fog closing in at the edges.
+  // ── Light: the candle's warm glow around the explorer (it shrinks and
+  // flickers as it burns), then fog closing in at the edges.
   ctx.globalAlpha = 1;
-  const glowR = T * (1.7 + sc.lanternFx * 1.4);
-  const glow = ctx.createRadialGradient(psx, psy, 0, psx, psy, glowR);
-  glow.addColorStop(0, withAlpha(pal.glow, 0.26 + sc.lanternFx * 0.16));
-  glow.addColorStop(1, withAlpha(pal.glow, 0));
-  ctx.fillStyle = glow;
-  ctx.fillRect(psx - glowR, psy - glowR, glowR * 2, glowR * 2);
+  const flicker = sc.lightFx < 0.25 ? 0.75 + 0.25 * Math.sin(sc.time / 70) * Math.sin(sc.time / 190) : 1;
+  const glowR = T * (0.8 + sc.lightFx * 1.6) * flicker;
+  if (sc.lightFx > 0.005) {
+    const glow = ctx.createRadialGradient(psx, psy, 0, psx, psy, glowR);
+    glow.addColorStop(0, withAlpha(pal.glow, (0.18 + sc.lightFx * 0.18) * flicker));
+    glow.addColorStop(1, withAlpha(pal.glow, 0));
+    ctx.fillStyle = glow;
+    ctx.fillRect(psx - glowR, psy - glowR, glowR * 2, glowR * 2);
+  }
 
-  const sight = DIFFICULTIES[game.level].vision + sc.lanternFx * DIFFICULTIES[game.level].lanternBonus;
+  const sight = sc.sightFx;
   const fogInner = T * (sight + 0.3);
   const fogOuter = T * (sight + 5);
   const haze = ctx.createRadialGradient(psx, psy, fogInner, psx, psy, fogOuter);
@@ -298,6 +308,15 @@ export function draw(ctx: CanvasRenderingContext2D, sc: Scene): void {
   haze.addColorStop(1, withAlpha(pal.fog, 0.55));
   ctx.fillStyle = haze;
   ctx.fillRect(0, 0, W, H);
+  // Running low: real darkness creeps in from the edges, total when it's out.
+  const dark = Math.max(0, Math.min(1, 1 - sight / 1.5));
+  if (dark > 0.01) {
+    const night = ctx.createRadialGradient(psx, psy, T * (0.35 + sight * 0.6), psx, psy, T * (1.4 + sight * 1.5));
+    night.addColorStop(0, "rgba(8,6,14,0)");
+    night.addColorStop(1, `rgba(8,6,14,${(0.55 + 0.4 * dark) * dark})`);
+    ctx.fillStyle = night;
+    ctx.fillRect(0, 0, W, H);
+  }
   // A breath of the theme's sky over everything: dusk, cave dark, cold air.
   const sky = ctx.createLinearGradient(0, 0, 0, H);
   sky.addColorStop(0, withAlpha(pal.skyTop, 0.14));
@@ -340,8 +359,15 @@ export function draw(ctx: CanvasRenderingContext2D, sc: Scene): void {
     }
   }
 
-  // ── Names, on top of everything, only for what's in sight.
-  drawLabels(ctx, sc, ox, oy, x0, x1, y0, y1);
+  // ── A heart lost: a red pulse closing in from the edges.
+  if (sc.hurtFx > 0.01) {
+    const hurt = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.25, W / 2, H / 2, Math.max(W, H) * 0.75);
+    hurt.addColorStop(0, "rgba(200,30,50,0)");
+    hurt.addColorStop(1, `rgba(200,30,50,${0.5 * sc.hurtFx})`);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = hurt;
+    ctx.fillRect(0, 0, W, H);
+  }
   ctx.globalAlpha = 1;
 }
 
@@ -376,10 +402,10 @@ function drawThing(ctx: CanvasRenderingContext2D, sc: Scene, c: number, cx: numb
   const bob = Math.sin(sc.time / 420 + c) * T * 0.04;
   switch (o.type) {
     case "exit":
-      drawExitArch(ctx, cx, cy, T, sc.pal);
+      drawExitArch(ctx, cx, cy, T, sc.pal, exitOpen(sc.game, s));
       break;
     case "checkpoint":
-      drawFlag(ctx, cx, cy, T, s.checkpoint === c, sc.time);
+      drawCandle(ctx, cx, cy, T, (s.candles & (1 << o.index)) === 0, sc.time);
       break;
     case "door":
       drawDoor(ctx, sc.game, c, cx, cy, T, wallH, thick, (s.keys & (1 << o.color)) !== 0);
@@ -510,7 +536,7 @@ function drawExitLight(ctx: CanvasRenderingContext2D, cx: number, cy: number, T:
   ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
 }
 
-function drawExitArch(ctx: CanvasRenderingContext2D, cx: number, cy: number, T: number, pal: Palette) {
+function drawExitArch(ctx: CanvasRenderingContext2D, cx: number, cy: number, T: number, pal: Palette, open: boolean) {
   const w = T * 0.62;
   const h = T * 0.72;
   const base = cy + T * 0.18;
@@ -536,6 +562,23 @@ function drawExitArch(ctx: CanvasRenderingContext2D, cx: number, cy: number, T: 
     ctx.lineTo(cx + w * 0.28, yy);
     ctx.stroke();
   }
+  if (open) return;
+  // Sealed: dark doorway behind iron bars with three empty sockets above.
+  ctx.fillStyle = shade(pal.wallFace, -0.45);
+  archPath(ctx, cx, base, w * 0.62, h * 0.78);
+  ctx.fill();
+  ctx.strokeStyle = "#2a2622";
+  ctx.lineWidth = Math.max(1.5, T * 0.035);
+  for (const k of [-0.2, 0, 0.2]) {
+    ctx.beginPath();
+    ctx.moveTo(cx + w * k, base);
+    ctx.lineTo(cx + w * k, base - h * 0.72);
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.moveTo(cx - w * 0.31, base - h * 0.4);
+  ctx.lineTo(cx + w * 0.31, base - h * 0.4);
+  ctx.stroke();
 }
 
 function archPath(ctx: CanvasRenderingContext2D, cx: number, base: number, w: number, h: number) {
@@ -548,28 +591,53 @@ function archPath(ctx: CanvasRenderingContext2D, cx: number, base: number, w: nu
   ctx.closePath();
 }
 
-function drawFlag(ctx: CanvasRenderingContext2D, cx: number, cy: number, T: number, active: boolean, time: number) {
-  const px = cx - T * 0.12;
-  const top = cy - T * 0.62;
-  shadow(ctx, cx, cy, T * 0.14);
-  ctx.strokeStyle = "#4a3b2c";
-  ctx.lineWidth = Math.max(1.5, T * 0.045);
-  ctx.lineCap = "round";
+/** A route candle (v2 replaces the respawn flags): lit until used, then a stub. */
+function drawCandle(ctx: CanvasRenderingContext2D, cx: number, cy: number, T: number, lit: boolean, time: number) {
+  const a = ctx.globalAlpha;
+  const w = T * 0.13;
+  const h = lit ? T * 0.34 : T * 0.12;
+  const base = cy + T * 0.08;
+  if (lit) {
+    const flicker = 0.85 + 0.15 * Math.sin(time / 80 + cx) * Math.sin(time / 210);
+    const halo = ctx.createRadialGradient(cx, base - h - T * 0.08, 0, cx, base - h - T * 0.08, T * 0.42);
+    halo.addColorStop(0, `rgba(255,190,90,${0.5 * flicker})`);
+    halo.addColorStop(1, "rgba(255,190,90,0)");
+    ctx.fillStyle = halo;
+    ctx.fillRect(cx - T * 0.45, base - h - T * 0.5, T * 0.9, T * 0.9);
+    ctx.globalAlpha = a;
+  }
+  shadow(ctx, cx, cy, T * 0.13);
+  ctx.globalAlpha = a;
+  ctx.fillStyle = "#6b4a2f";
   ctx.beginPath();
-  ctx.moveTo(px, cy + T * 0.08);
-  ctx.lineTo(px, top);
-  ctx.stroke();
-  const wave = active ? Math.sin(time / 180) * T * 0.04 : 0;
-  ctx.fillStyle = active ? START_COLOR : FLAG_COLOR;
-  ctx.beginPath();
-  ctx.moveTo(px, top);
-  ctx.quadraticCurveTo(px + T * 0.2, top + T * 0.04 + wave, px + T * 0.38, top + T * 0.14);
-  ctx.lineTo(px, top + T * 0.3);
-  ctx.closePath();
+  ctx.ellipse(cx, base, w * 1.25, w * 0.45, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = "rgba(0,0,0,0.3)";
+  ctx.fillStyle = lit ? "#f6ead2" : "#cdbfa6";
+  roundRect(ctx, cx - w / 2, base - h, w, h, w * 0.3);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(60,40,20,0.45)";
   ctx.lineWidth = Math.max(1, T * 0.02);
   ctx.stroke();
+  if (lit) {
+    const fy = base - h - T * 0.02;
+    const sway = Math.sin(time / 160 + cx) * T * 0.015;
+    ctx.fillStyle = "#ffb43d";
+    ctx.beginPath();
+    ctx.moveTo(cx, fy);
+    ctx.quadraticCurveTo(cx - T * 0.06, fy - T * 0.06, cx + sway, fy - T * 0.17);
+    ctx.quadraticCurveTo(cx + T * 0.06, fy - T * 0.06, cx, fy);
+    ctx.fill();
+    ctx.fillStyle = "#fff4c2";
+    ctx.beginPath();
+    ctx.ellipse(cx, fy - T * 0.05, T * 0.022, T * 0.04, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.strokeStyle = "#2b2520";
+    ctx.beginPath();
+    ctx.moveTo(cx, base - h);
+    ctx.lineTo(cx + T * 0.02, base - h - T * 0.05);
+    ctx.stroke();
+  }
 }
 
 function drawDoor(ctx: CanvasRenderingContext2D, game: Game, c: number, cx: number, cy: number, T: number, wallH: number, thick: number, open: boolean) {
@@ -662,94 +730,102 @@ function drawLantern(ctx: CanvasRenderingContext2D, cx: number, cy: number, T: n
   ctx.stroke();
 }
 
-/** Small silhouettes per landmark family; the name label does the real work. */
-const LANDMARK_FAMILY: Record<string, "plant" | "mushroom" | "stone" | "water" | "crystal" | "object"> = {
-  tree: "plant", bush: "plant", pine: "plant", palm: "plant", cactus: "plant",
-  mushroom: "mushroom",
-  rock: "stone", stalagmite: "stone", block: "stone", column: "stone", statue: "stone", igloo: "stone", snowman: "stone",
-  pond: "water", puddle: "water",
-  crystal: "crystal",
-};
+const pathCache = new WeakMap<Game, Path2D[]>();
+const emblemCache = new WeakMap<Game, Path2D[]>();
+const SEAL_GOLD = "#f2b84b";
 
-function drawLandmark(ctx: CanvasRenderingContext2D, cx: number, cy: number, T: number, l: Landmark, pal: Palette) {
-  // Tucked into the cell's upper-left corner so the explorer walks past it.
-  const x = cx - T * 0.22;
-  const y = cy - T * 0.12;
-  const fam = LANDMARK_FAMILY[l.kind] ?? "object";
-  const dark = pal.wallFace;
-  const light = pal.wallTop;
-  switch (fam) {
-    case "plant":
-      shadow(ctx, x, y, T * 0.16);
-      ctx.fillStyle = shade(dark, -0.2);
-      ctx.fillRect(x - T * 0.03, y - T * 0.22, T * 0.06, T * 0.24);
-      ctx.fillStyle = light;
-      ctx.beginPath();
-      ctx.arc(x, y - T * 0.32, T * 0.17, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = dark;
-      ctx.beginPath();
-      ctx.arc(x + T * 0.05, y - T * 0.28, T * 0.11, 0, Math.PI * 2);
-      ctx.fill();
-      break;
-    case "mushroom":
-      shadow(ctx, x, y, T * 0.14);
-      ctx.fillStyle = "#f3ead8";
-      ctx.fillRect(x - T * 0.04, y - T * 0.2, T * 0.08, T * 0.2);
-      ctx.fillStyle = "#d1495b";
-      ctx.beginPath();
-      ctx.ellipse(x, y - T * 0.2, T * 0.17, T * 0.11, 0, Math.PI, 0);
-      ctx.fill();
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.arc(x - T * 0.06, y - T * 0.25, T * 0.025, 0, Math.PI * 2);
-      ctx.arc(x + T * 0.06, y - T * 0.24, T * 0.02, 0, Math.PI * 2);
-      ctx.fill();
-      break;
-    case "stone":
-      shadow(ctx, x, y, T * 0.17);
-      ctx.fillStyle = dark;
-      ctx.beginPath();
-      ctx.ellipse(x, y - T * 0.08, T * 0.17, T * 0.14, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = light;
-      ctx.beginPath();
-      ctx.ellipse(x - T * 0.03, y - T * 0.12, T * 0.12, T * 0.09, 0, 0, Math.PI * 2);
-      ctx.fill();
-      break;
-    case "water":
-      ctx.fillStyle = "#6fa8c9";
-      ctx.beginPath();
-      ctx.ellipse(x + T * 0.04, y + T * 0.02, T * 0.2, T * 0.11, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.7)";
-      ctx.lineWidth = Math.max(1, T * 0.02);
-      ctx.beginPath();
-      ctx.ellipse(x, y, T * 0.08, T * 0.04, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      break;
-    case "crystal":
-      shadow(ctx, x, y, T * 0.14);
-      ctx.fillStyle = l.label.includes("rosa") ? "#e58fc0" : l.label.includes("verde") ? "#7fd18e" : "#7fb8e8";
-      ctx.beginPath();
-      ctx.moveTo(x - T * 0.1, y);
-      ctx.lineTo(x - T * 0.05, y - T * 0.32);
-      ctx.lineTo(x + T * 0.02, y);
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + T * 0.07, y - T * 0.24);
-      ctx.lineTo(x + T * 0.12, y);
-      ctx.fill();
-      break;
-    case "object":
-      shadow(ctx, x, y, T * 0.15);
-      ctx.fillStyle = dark;
-      roundRect(ctx, x - T * 0.13, y - T * 0.2, T * 0.26, T * 0.2, T * 0.05);
-      ctx.fill();
-      ctx.fillStyle = light;
-      roundRect(ctx, x - T * 0.13, y - T * 0.24, T * 0.26, T * 0.08, T * 0.04);
-      ctx.fill();
-      break;
+/** The stone plate under a station: a ring of light while its seal is still to win. */
+function drawStationPlate(ctx: CanvasRenderingContext2D, cx: number, cy: number, T: number, sealed: boolean, time: number) {
+  const a = ctx.globalAlpha;
+  ctx.fillStyle = "rgba(0,0,0,0.22)";
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + T * 0.08, T * 0.42, T * 0.2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.lineWidth = Math.max(1.5, T * 0.04);
+  ctx.strokeStyle = sealed ? SEAL_GOLD : `rgba(255,236,180,${0.45 + 0.25 * Math.sin(time / 600)})`;
+  ctx.setLineDash(sealed ? [] : [T * 0.08, T * 0.06]);
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + T * 0.08, T * 0.4, T * 0.18, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = a;
+}
+
+/**
+ * A station: a stone post holding a medallion with this game's emblem (the
+ * same path the guide's map and the seals HUD draw). Once its seal is won the
+ * medallion turns gold and gets a ring of rays.
+ */
+function drawStation(ctx: CanvasRenderingContext2D, sc: Scene, index: number, cx: number, cy: number, T: number) {
+  let paths = emblemCache.get(sc.game);
+  if (!paths) {
+    paths = stationEmblems(sc.game).map((e) => new Path2D(e.d));
+    emblemCache.set(sc.game, paths);
   }
+  const sealed = (sc.state.seals & (1 << index)) !== 0;
+  const pal = sc.pal;
+  const base = cy + T * 0.1;
+  const r = T * 0.24;
+  const my = base - T * 0.52;
+  // Post.
+  ctx.fillStyle = pal.wallFace;
+  roundRect(ctx, cx - T * 0.07, my, T * 0.14, base - my, T * 0.03);
+  ctx.fill();
+  // Medallion.
+  if (sealed) {
+    ctx.strokeStyle = withAlpha(SEAL_GOLD, 0.7);
+    ctx.lineWidth = Math.max(1, T * 0.025);
+    for (let i = 0; i < 8; i++) {
+      const ang = (i / 8) * Math.PI * 2 + sc.time / 2400;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(ang) * r * 1.15, my + Math.sin(ang) * r * 1.15);
+      ctx.lineTo(cx + Math.cos(ang) * r * 1.45, my + Math.sin(ang) * r * 1.45);
+      ctx.stroke();
+    }
+  }
+  ctx.fillStyle = sealed ? SEAL_GOLD : pal.wallTop;
+  ctx.strokeStyle = sealed ? "#a5700f" : shade(pal.wallFace, -0.25);
+  ctx.lineWidth = Math.max(1.5, T * 0.04);
+  ctx.beginPath();
+  ctx.arc(cx, my, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  const path = paths[index];
+  if (!path) return;
+  ctx.save();
+  ctx.translate(cx, my);
+  ctx.scale(r * 0.72, r * 0.72);
+  ctx.fillStyle = sealed ? "#5a3a08" : shade(pal.wallFace, -0.35);
+  ctx.fill(path);
+  ctx.restore();
+}
+
+/**
+ * Landmarks: this game's generated silhouettes (the same paths the guide's map
+ * draws), standing in the cell's back-left corner so the explorer walks past.
+ */
+function drawLandmark(ctx: CanvasRenderingContext2D, sc: Scene, index: number, cx: number, cy: number, T: number) {
+  let paths = pathCache.get(sc.game);
+  if (!paths) {
+    paths = landmarkShapes(sc.game).map((s) => new Path2D(s.d));
+    pathCache.set(sc.game, paths);
+  }
+  const path = paths[index];
+  if (!path) return;
+  const r = T * 0.27;
+  const x = cx - T * 0.16;
+  const base = cy + T * 0.06;
+  shadow(ctx, x, base - T * 0.02, r * 0.9);
+  ctx.save();
+  ctx.translate(x, base - r);
+  ctx.scale(r, r);
+  ctx.fillStyle = shade(sc.pal.wallFace, -0.15);
+  ctx.fill(path);
+  ctx.strokeStyle = shade(sc.pal.wallTop, 0.25);
+  ctx.lineWidth = 0.09;
+  ctx.lineJoin = "round";
+  ctx.stroke(path);
+  ctx.restore();
 }
 
 // ─────────────────────────────────────────────────────────────── player
@@ -811,65 +887,6 @@ function drawPlayer(ctx: CanvasRenderingContext2D, sx: number, sy: number, T: nu
     ctx.fill();
   }
   ctx.restore();
-}
-
-// ─────────────────────────────────────────────────────────────── labels
-
-function drawLabels(ctx: CanvasRenderingContext2D, sc: Scene, ox: number, oy: number, x0: number, x1: number, y0: number, y1: number) {
-  const { game, tile: T } = sc;
-  const g = game.grid;
-  const size = Math.round(Math.max(11, Math.min(14, T * 0.22)));
-  const placed: Box[] = [];
-  for (let y = y0; y <= y1; y++) {
-    for (const item of sc.rows[y]) {
-      const c = item.cell;
-      const x = c % g.width;
-      if (x < x0 || x > x1 || !sc.inSight[c]) continue;
-      const a = Math.min(1, (sc.vis[c] - 0.35) * 2.5);
-      if (a <= 0) continue;
-      let text: string | null = null;
-      let italic = false;
-      if (item.kind === "landmark") {
-        text = item.landmark.label;
-        italic = true;
-      } else {
-        const o = game.occupant[c]!;
-        if (o.type === "key" && !(sc.state.keys & (1 << o.color))) text = keyName(o.color);
-        else if (o.type === "door") text = doorName(o.color);
-        else if (o.type === "portal") text = portalName(game.portals[o.pair].symbol);
-        else if (o.type === "exit") text = "salida";
-      }
-      if (!text) continue;
-      const cx = ox + x * T + (item.kind === "landmark" ? T * 0.28 : T / 2);
-      const cy = oy + y * T + (item.kind === "landmark" ? -T * 0.1 : -T * 0.12);
-      pill(ctx, text, cx, cy, size, italic ? sc.fonts.display : sc.fonts.ui, italic, a, placed);
-    }
-  }
-}
-
-interface Box { x: number; y: number; w: number; h: number }
-
-function pill(ctx: CanvasRenderingContext2D, text: string, cx: number, y: number, size: number, font: string, italic: boolean, a: number, placed: Box[]) {
-  ctx.font = `${italic ? "italic " : ""}${italic ? 500 : 600} ${size}px ${font}`;
-  const w = ctx.measureText(text).width + size * 1.1;
-  const h = size * 1.7;
-  // Nudge up until it doesn't cover a label already drawn this frame.
-  let cy = y;
-  for (let tries = 0; tries < 4; tries++) {
-    const hit = placed.find((b) => Math.abs(b.x - cx) * 2 < b.w + w && Math.abs(b.y - cy) * 2 < b.h + h);
-    if (!hit) break;
-    cy = hit.y - (hit.h + h) / 2 - 2;
-  }
-  placed.push({ x: cx, y: cy, w, h });
-  ctx.globalAlpha = a * 0.88;
-  ctx.fillStyle = "rgba(28,24,32,0.82)";
-  roundRect(ctx, cx - w / 2, cy - h / 2, w, h, h / 2);
-  ctx.fill();
-  ctx.globalAlpha = a;
-  ctx.fillStyle = "#fffaf0";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(text, cx, cy + size * 0.05);
 }
 
 // ─────────────────────────────────────────────────────────────── helpers

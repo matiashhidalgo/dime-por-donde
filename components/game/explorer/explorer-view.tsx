@@ -1,27 +1,55 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUp, Flag, Gamepad2, LampDesk, Star, X } from "lucide-react";
-import { DIFFICULTIES, type Dir, type Game, KEY_COLORS, type PlayEvent, type PlayState, solve, starCount } from "@/src/engine";
+import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUp, EyeOff, Flame, FlipHorizontal2, Gamepad2, Heart, LifeBuoy, RotateCw, Star, VenetianMask, X } from "lucide-react";
+import {
+  DIFFICULTIES,
+  type Dir,
+  type Game,
+  type CurseKind,
+  KEY_COLORS,
+  type PlayEvent,
+  type PlayState,
+  TUNING,
+  emergencyAvailable,
+  sealCount,
+  solve,
+  starCount,
+  stationEmblems,
+  takeEmergencyExit,
+} from "@/src/engine";
 import { audio, buzz } from "@/lib/audio";
-import { formatTime, useElapsed, usePrefersReducedMotion } from "@/lib/hooks";
+import { usePrefersReducedMotion } from "@/lib/hooks";
 import { readJSON, writeJSON } from "@/lib/storage";
 import { cn } from "@/lib/utils";
 import { ShapeGlyph } from "../guide/map-art";
 import { SoundToggle } from "../sound-toggle";
+import { Medallion } from "../trials";
+import { Button } from "../ui";
 import { ExplorerController, type HudState } from "./controller";
-import { createMessenger } from "./messages";
+import { CURSE_NAME, createMessenger } from "./messages";
+import { CureOverlay, CurseIcon } from "./cure-overlay";
+import type { Ending } from "../screens/result";
+import { StationOverlay } from "./station-overlay";
 
 /**
- * The explorer's screen: Canvas 2.5D maze in fog + a quiet HTML HUD.
+ * The explorer's screen: Canvas 2.5D maze in fog + a quiet HTML HUD (hearts,
+ * the candle's flame, stars, keys — shapes and colors, no names, no clock).
  * Input: arrows/WASD (hold to keep walking), swipe (swipe-and-hold walks),
  * and an optional on-screen pad.
  */
 
 export interface ExplorerOutcome {
-  timeMs: number;
+  ending: Ending;
+  hearts: number;
+  /** Hearts lost on this map (heals don't undo it). */
+  hurts: number;
   pits: number;
   stars: number;
+  /** v2: seals won (0 on v1 games). */
+  seals: number;
+  /** Informative only: time doesn't score in v2. */
+  timeMs: number;
 }
 
 const KEYMAP: Record<string, Dir> = {
@@ -37,15 +65,18 @@ export function ExplorerView({
   game,
   title,
   startedAt,
-  timed,
-  onArrived,
+  play,
+  subtitle = "Explorador · describe lo que ves",
+  onEnd,
   onQuit,
 }: {
   game: Game;
   title: string;
   startedAt: number;
-  timed: boolean;
-  onArrived: (o: ExplorerOutcome) => void;
+  /** Racha: hearts carried in and the PLAY level. */
+  play?: { hearts: number; level: number };
+  subtitle?: string;
+  onEnd: (o: ExplorerOutcome) => void;
   onQuit: () => void;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -54,14 +85,16 @@ export function ExplorerView({
   const reduce = usePrefersReducedMotion();
   const [hud, setHud] = useState<HudState | null>(null);
   const [toast, setToast] = useState<{ text: string; id: number; tone: "info" | "bad" | "good" } | null>(null);
-  const [stoppedAt, setStoppedAt] = useState<number | null>(null);
-  const [penaltyFlash, setPenaltyFlash] = useState(0);
   const [pad, setPad] = useState(false);
   const [hint, setHint] = useState(true);
-  const elapsed = useElapsed(startedAt, stoppedAt);
-  const arrivedAt = useRef<number | null>(null);
-  const onArrivedRef = useRef(onArrived);
-  onArrivedRef.current = onArrived;
+  /** Station whose overlay is open, or null. */
+  const [trial, setTrial] = useState<number | null>(null);
+  const [curing, setCuring] = useState(false);
+  /** The sealed exit offered the emergency way out: ask first. */
+  const [askExit, setAskExit] = useState(false);
+  const endedAt = useRef<number | null>(null);
+  const onEndRef = useRef(onEnd);
+  onEndRef.current = onEnd;
 
   // Pad default: on for touch screens; remembered once toggled.
   useEffect(() => {
@@ -89,48 +122,65 @@ export function ExplorerView({
   useEffect(() => {
     const canvas = canvasRef.current!;
     const wrap = wrapRef.current!;
-    const css = getComputedStyle(document.documentElement);
-    const fonts = {
-      ui: getComputedStyle(document.body).fontFamily || "system-ui, sans-serif",
-      display: css.getPropertyValue("--font-display").trim() || "Georgia, serif",
-    };
     let toastId = 0;
     const message = createMessenger(game);
     const ctrl = new ExplorerController({
       game,
       canvas,
       reducedMotion: reduce,
-      fonts,
       onHud: setHud,
       onEvent: (e: PlayEvent, s: PlayState) => {
-        if (e.type === "arrived") {
-          arrivedAt.current = Date.now();
-          setStoppedAt(arrivedAt.current);
-          buzz([40, 60, 40, 60, 120]);
+        if (e.type === "arrived" || e.type === "defeat") endedAt.current = Date.now();
+        if (e.type === "defeat" || e.type === "arrived" || e.type === "emergencyExit") {
+          setTrial(null);
+          setCuring(false);
+          setAskExit(false);
         }
-        if (e.type === "fell") {
-          setPenaltyFlash((n) => n + 1);
-          buzz(220);
+        if (e.type === "uncurse") setCuring(false);
+        if (e.type === "exitSealed" && e.emergency) {
+          ctrl.release();
+          setAskExit(true);
         }
-        if (e.type === "key" || e.type === "star") buzz(30);
-        if (e.type === "locked" || e.type === "checkpoint" || e.type === "teleported" || e.type === "swirl") buzz(18);
+        if (e.type === "station" && !e.sealed) {
+          ctrl.release();
+          setTrial(e.index);
+        }
+        if (e.type === "arrived") buzz([40, 60, 40, 60, 120]);
+        if (e.type === "key" || e.type === "star" || e.type === "lantern") buzz(30);
+        if (e.type === "locked" || e.type === "candle" || e.type === "teleported" || e.type === "swirl" || e.type === "darkness") buzz(18);
+        if (e.type === "emergencyExit") buzz([40, 60, 40]);
         const text = message(e, s);
         if (text) {
-          const tone = e.type === "fell" || e.type === "locked" ? "bad" : e.type === "key" || e.type === "star" || e.type === "arrived" ? "good" : "info";
-          setToast({ text, id: ++toastId, tone });
+          const bad =
+            e.type === "fell" || e.type === "locked" || e.type === "hurt" || e.type === "darkness" || e.type === "defeat" || e.type === "dimmed" || e.type === "trialFail";
+          const good =
+            e.type === "key" ||
+            e.type === "star" ||
+            e.type === "arrived" ||
+            e.type === "lantern" ||
+            e.type === "candle" ||
+            e.type === "seal" ||
+            e.type === "heal" ||
+            e.type === "emergencyExit" ||
+            (e.type === "uncurse" && e.cured);
+          setToast({ text, id: ++toastId, tone: bad ? "bad" : good ? "good" : "info" });
         }
       },
-      onArrive: (s) => {
-        const at = arrivedAt.current ?? Date.now();
-        onArrivedRef.current({ timeMs: at - startedAt, pits: s.pits, stars: starCount(s) });
+      onEnd: (s) => {
+        const at = endedAt.current ?? Date.now();
+        const ending: Ending = !s.arrived ? "lost" : s.escaped ? "escaped" : "won";
+        onEndRef.current({ ending, hearts: s.hearts, hurts: s.hurts, pits: s.pits, stars: starCount(s), seals: sealCount(s), timeMs: at - startedAt });
       },
+      play,
     });
     ctrlRef.current = ctrl;
     if (process.env.NODE_ENV !== "production") {
       // Dev-only handles for playtesting and perf checks from the console.
-      const w = window as unknown as { __explorer?: ExplorerController; __explorerSolution?: Dir[] };
+      const w = window as unknown as { __explorer?: ExplorerController; __explorerSolution?: Dir[]; __explorerRoute?: (to: number) => Dir[] };
       w.__explorer = ctrl;
       w.__explorerSolution = solve(game, game.start, game.exit).dirs;
+      // Shortest route from where the explorer stands now, with the keys in hand.
+      w.__explorerRoute = (to: number) => solve(game, ctrl.state.cell, to, ctrl.state.keys).dirs;
     }
 
     const ro = new ResizeObserver(() => {
@@ -143,11 +193,26 @@ export function ExplorerView({
       ctrl.dispose();
       ctrlRef.current = null;
     };
+    // `play` is fixed for the life of this view (the parent remounts it per map).
   }, [game, reduce, startedAt]);
+
+  // An open station, cure or question pauses the maze (the overlay has the keyboard).
+  const overlay = trial !== null || curing || askExit;
+  useEffect(() => {
+    if (ctrlRef.current) ctrlRef.current.paused = overlay;
+  }, [overlay]);
+
+  const leaveNow = () => {
+    const ctrl = ctrlRef.current;
+    if (!ctrl) return;
+    setAskExit(false);
+    ctrl.applyTrial(takeEmergencyExit(game, ctrl.state));
+  };
 
   // Keyboard: press starts a move, holding keeps walking.
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       const d = KEYMAP[e.code];
       if (d === undefined || e.metaKey || e.ctrlKey || e.altKey) return;
       e.preventDefault();
@@ -213,11 +278,13 @@ export function ExplorerView({
     swipe.current = null;
   };
 
-  const penalty = hud ? hud.pits * 10_000 : 0;
-  const shownTime = elapsed + penalty;
   const maxStars = DIFFICULTIES[game.level].stars;
+  const curse = hud?.state.curse ?? null;
+  const masked = curse?.kind === "masked";
+  const mirrored = curse?.kind === "mirror";
+  const canLeave = !!hud && emergencyAvailable(game, hud.state);
+  const emblems = game.stations ? stationEmblems(game) : [];
   const doorColors = [...new Set(game.doors.map((d) => d.color))].sort();
-  const lanternLeft = hud && hud.lanternUntil > Date.now() ? Math.ceil((hud.lanternUntil - Date.now()) / 1000) : 0;
 
   return (
     <div className="fixed inset-0 flex flex-col bg-background">
@@ -227,20 +294,7 @@ export function ExplorerView({
         </button>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{title}</p>
-          <p className="truncate text-xs text-muted">Explorador · describe lo que ves</p>
-        </div>
-        <div className="relative">
-          <div
-            className={cn("rounded-xl px-3 py-1.5 font-mono text-lg tabular-nums", timed ? "bg-background" : "text-sm text-muted")}
-            aria-label={timed ? `Tiempo ${formatTime(shownTime)}` : "Sin tiempo"}
-          >
-            {timed ? formatTime(shownTime) : "sin tiempo"}
-          </div>
-          {timed && penaltyFlash > 0 && (
-            <span key={penaltyFlash} className="penalty-pop pointer-events-none absolute -bottom-5 right-1 text-xs font-semibold text-accent">
-              +10 s
-            </span>
-          )}
+          <p className="truncate text-xs text-muted">{subtitle}</p>
         </div>
         <button
           onClick={togglePad}
@@ -263,7 +317,8 @@ export function ExplorerView({
       >
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 h-full w-full"
+          // «Espejo»: the explorer's world flips; the guide's map doesn't.
+          className={cn("absolute inset-0 h-full w-full", mirrored && "-scale-x-100", !reduce && "transition-transform duration-500")}
           role="img"
           aria-label="Tu alrededor en el laberinto. Muévete con las flechas, WASD, deslizando o con la cruceta."
         />
@@ -271,14 +326,31 @@ export function ExplorerView({
         {/* Status chips */}
         {hud && (
           <div className="pointer-events-none absolute inset-x-2 top-2 flex flex-wrap items-start gap-1.5 sm:inset-x-4 sm:top-3">
+            {masked ? (
+              <Chip label="Máscara: no ves tus corazones, tu vela ni tus sellos" className="bg-[#2a1840]/90">
+                <VenetianMask size={16} />
+                <span className="text-xs font-semibold">? ? ?</span>
+              </Chip>
+            ) : (
+              <>
+                <Hearts hearts={hud.hearts} />
+                <Candle light={hud.light} radius={hud.radius} reduce={reduce} />
+              </>
+            )}
+            {emblems.length > 0 && !masked && (
+              <Chip label={`Sellos: ${sealCount(hud.state)} de ${emblems.length}`} className={sealCount(hud.state) === emblems.length ? "bg-[#6b4a0c]/90" : undefined}>
+                {emblems.map((em, i) => (
+                  <Medallion key={i} d={em.d} sealed={(hud.seals & (1 << i)) !== 0} size={20} className="text-white/80" />
+                ))}
+              </Chip>
+            )}
             <Chip label={`Estrellas ${hud.stars} de ${maxStars}`}>
               {Array.from({ length: maxStars }, (_, i) => (
                 <Star key={i} size={16} className={i < hud.stars ? "fill-[#f2b84b] text-[#a5700f]" : "text-white/45"} />
               ))}
             </Chip>
             {doorColors.length > 0 && (
-              <Chip label={`Llaves: ${doorColors.map((c) => `${KEY_COLORS[c].colorName} ${hud.keys & (1 << c) ? "sí" : "no"}`).join(", ")}`}>
-                <span className="text-xs text-white/75">Llaves</span>
+              <Chip label={`Llaves: tienes ${doorColors.filter((c) => hud.keys & (1 << c)).length} de ${doorColors.length}`}>
                 {doorColors.map((c) => {
                   const k = KEY_COLORS[c];
                   const has = (hud.keys & (1 << c)) !== 0;
@@ -290,27 +362,39 @@ export function ExplorerView({
                 })}
               </Chip>
             )}
-            <Chip label={hud.checkpointIndex < 0 ? "Si caes vuelves a la entrada" : "Si caes vuelves a la última bandera"}>
-              <Flag size={15} className={hud.checkpointIndex < 0 ? "text-white/60" : "text-[#7fd49b]"} />
-              <span className="text-xs">{hud.checkpointIndex < 0 ? "Entrada" : "Bandera"}</span>
-            </Chip>
-            {lanternLeft > 0 && (
-              <Chip label={`Farol encendido, ${lanternLeft} segundos`} className="bg-[#7a5a12]/85">
-                <LampDesk size={15} className="text-[#ffd166]" />
-                <LanternCountdown until={hud.lanternUntil} />
+            {hud.invert && (
+              <Chip label={hud.invert.axes === "xy" ? "Controles invertidos: todo al revés" : "Controles invertidos: izquierda y derecha"} className="bg-[#5b2fa0]/90">
+                <ArrowLeftRight size={15} />
+                <span className="text-xs font-semibold">{hud.invert.axes === "xy" ? "Todo invertido" : "Izq ↔ der"}</span>
               </Chip>
             )}
-            {hud.invert && (
-              <Chip label={`Controles invertidos ${hud.invert.left} pasos`} className="bg-[#5b2fa0]/90">
-                <ArrowLeftRight size={15} />
-                <span className="text-xs font-semibold">{hud.invert.axes === "xy" ? "Todo invertido" : "Izq ↔ der"} · {hud.invert.left}</span>
-              </Chip>
+            {/* The curse: in the same row (it wraps on phones), but tappable: it opens the cure. */}
+            {curse && !hud.lost && !hud.arrived && (
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => {
+                  ctrlRef.current?.release();
+                  setCuring(true);
+                }}
+                aria-haspopup="dialog"
+                aria-label={`Maldición de ${CURSE_NAME[curse.kind].toLowerCase()}: se pasa en ${curse.left} pasos. Abrir la cura`}
+                className="pointer-events-auto flex h-8 items-center gap-1.5 rounded-full bg-[#5b2fa0]/92 pl-1.5 pr-1 text-white shadow-md"
+              >
+                <CurseKindIcon kind={curse.kind} />
+                <span className="text-xs font-semibold">{CURSE_NAME[curse.kind]}</span>
+                <span className="flex gap-0.5" aria-hidden>
+                  {Array.from({ length: Math.min(6, Math.ceil(curse.left / 4)) }, (_, i) => (
+                    <span key={i} className="h-1.5 w-1.5 rounded-full bg-white/80" />
+                  ))}
+                </span>
+                <span className="ml-0.5 rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-semibold">Curar</span>
+              </button>
             )}
           </div>
         )}
 
         {/* Event toast */}
-        <div aria-live="polite" className="pointer-events-none absolute inset-x-0 top-24 flex justify-center px-4 sm:top-16">
+        <div aria-live="polite" className="pointer-events-none absolute inset-x-0 top-24 z-40 flex justify-center px-4 sm:top-16">
           {toast && (
             <p
               key={toast.id}
@@ -330,19 +414,93 @@ export function ExplorerView({
           </p>
         )}
 
-        {/* Nearby, for describing */}
-        {hud && hud.nearby.length > 0 && (
-          <div className={cn("pointer-events-none absolute bottom-3 left-2 right-2 flex sm:left-4", pad ? "justify-start pr-44" : "justify-center")}>
-            <p className="max-w-full truncate rounded-full bg-black/60 px-3.5 py-2 text-sm text-white">
-              <span className="text-white/65">Cerca: </span>
-              {hud.nearby.join(" · ")}
-            </p>
+        {hud && canLeave && !askExit && trial === null && (
+          <div className="absolute inset-x-0 bottom-4 flex justify-center px-4" onPointerDown={(e) => e.stopPropagation()}>
+            <button onClick={() => setAskExit(true)} className="flex h-12 items-center gap-2 rounded-full bg-[#7a1f2b]/92 px-5 font-medium text-white shadow-lg">
+              <LifeBuoy size={20} /> Salida de emergencia
+            </button>
           </div>
         )}
 
-        {pad && <DPad ctrl={ctrlRef} />}
+        {hud && hud.station >= 0 && trial === null && !hud.lost && (
+          <div className="absolute inset-x-0 bottom-4 flex justify-center px-4" onPointerDown={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setTrial(hud.station)}
+              className="flex h-12 items-center gap-2 rounded-full bg-[#28232e]/92 pl-2 pr-5 font-medium text-white shadow-lg"
+            >
+              <Medallion d={emblems[hud.station].d} sealed={false} size={34} className="text-white/85" />
+              Abrir la estación
+            </button>
+          </div>
+        )}
+
+        {pad && !overlay && <DPad ctrl={ctrlRef} />}
       </div>
+
+      {hud && curing && curse && (
+        <CureOverlay
+          game={game}
+          curse={curse}
+          state={hud.state}
+          reduce={reduce}
+          onResult={(r) => ctrlRef.current?.applyTrial(r)}
+          onClose={() => setCuring(false)}
+        />
+      )}
+
+      {hud && askExit && (
+        <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/45 p-4 sm:items-center" onPointerDown={(e) => e.stopPropagation()}>
+          <div role="dialog" aria-modal="true" aria-labelledby="exit-title" className="w-full max-w-sm rounded-3xl bg-card p-6 shadow-2xl">
+            <h2 id="exit-title" className="flex items-center gap-2 font-display text-2xl">
+              <LifeBuoy size={24} className="shrink-0" /> ¿Salida de emergencia?
+            </h2>
+            <p className="mt-2 text-sm">
+              La salida sigue sellada, pero hay una rendija. Salen con {sealCount(hud.state) === 1 ? "1 sello" : `${sealCount(hud.state)} sellos`} de {emblems.length}.
+            </p>
+            <p className="mt-2 text-sm text-muted">
+              {play
+                ? `La racha sigue, con ${TUNING.streak.heartsAfterEscape === 1 ? "1 corazón" : `${TUNING.streak.heartsAfterEscape} corazones`}, y el próximo mapa se pone más bravo.`
+                : "Cuenta como escape, pero sin estrellas de calificación."}
+            </p>
+            <div className="mt-6 grid grid-cols-2 gap-3">
+              <Button variant="secondary" onClick={() => setAskExit(false)} autoFocus>
+                Seguir buscando
+              </Button>
+              <Button onClick={leaveNow}>Salir por aquí</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {hud && trial !== null && game.stations && (
+        <StationOverlay
+          game={game}
+          station={game.stations[trial]}
+          state={hud.state}
+          reduce={reduce}
+          onResult={(r) => ctrlRef.current?.applyTrial(r)}
+          onClose={() => setTrial(null)}
+        />
+      )}
     </div>
+  );
+}
+
+const CURSE_ICONS: Record<CurseKind, typeof RotateCw> = {
+  turn: RotateCw,
+  blind: EyeOff,
+  hungry: Flame,
+  masked: VenetianMask,
+  mirror: FlipHorizontal2,
+};
+
+function CurseKindIcon({ kind }: { kind: CurseKind }) {
+  const Icon = CURSE_ICONS[kind];
+  return (
+    <span className="relative flex h-6 w-6 items-center justify-center" aria-hidden>
+      <CurseIcon size={22} />
+      <Icon size={11} className="absolute -bottom-0.5 -right-0.5 rounded-full bg-[#5b2fa0]" />
+    </span>
   );
 }
 
@@ -356,13 +514,46 @@ function Chip({ label, className, children }: { label: string; className?: strin
   );
 }
 
-function LanternCountdown({ until }: { until: number }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 250);
-    return () => window.clearInterval(id);
-  }, []);
-  return <span className="text-xs tabular-nums">{Math.max(0, Math.ceil((until - now) / 1000))} s</span>;
+/** Shared hearts: full ones filled red, lost ones as outlines (shape + fill, not color alone). */
+function Hearts({ hearts }: { hearts: number }) {
+  return (
+    <Chip label={`Corazones: ${hearts} de ${TUNING.hearts}`} className={hearts <= 1 ? "bg-[#7a1f2b]/85" : undefined}>
+      {Array.from({ length: TUNING.hearts }, (_, i) => (
+        <Heart
+          key={`${i}-${i < hearts}`}
+          size={16}
+          className={cn(i < hearts ? "fill-[#ef5466] text-[#ffd0d6]" : "text-white/45", i === hearts && "heart-lost")}
+        />
+      ))}
+    </Chip>
+  );
+}
+
+const CANDLE_WORDS = ["apagada", "casi apagada", "a media luz", "encendida"];
+
+/**
+ * The candle as a flame that shrinks and dims: deliberately no number or
+ * countdown (GAME_SPEC_V2.md §3). Screen readers get a word for the level.
+ */
+function Candle({ light, radius, reduce }: { light: number; radius: number; reduce: boolean }) {
+  const out = light <= 0;
+  const h = 4 + 9 * Math.sqrt(light);
+  const flame = light > 0.5 ? "#ffd166" : light > 0.25 ? "#ffb43d" : "#ff8a3d";
+  return (
+    <Chip label={`Vela ${CANDLE_WORDS[Math.max(0, Math.min(3, radius))]}`} className={out ? "bg-[#1a1720]/90" : light <= 0.25 ? "bg-[#5a3a12]/85" : undefined}>
+      <svg width={18} height={22} viewBox="0 0 18 22" aria-hidden className={cn(!reduce && light > 0 && light <= 0.25 && "candle-gutter")}>
+        <rect x={6} y={13} width={6} height={8} rx={1.5} fill={out ? "#8f8794" : "#f6ead2"} />
+        <line x1={9} y1={13} x2={9} y2={11} stroke="#2b2520" strokeWidth={1.2} strokeLinecap="round" />
+        {!out && <path d={`M9 ${11.5 - h} C ${9 - h * 0.45} ${11 - h * 0.45}, ${9 - h * 0.3} 11.5, 9 11.5 C ${9 + h * 0.3} 11.5, ${9 + h * 0.45} ${11 - h * 0.45}, 9 ${11.5 - h} Z`} fill={flame} />}
+        {out && <path d="M9 9 q 2 -2 0 -4 q -2 -2 0 -4" stroke="#8f8794" strokeWidth={1.1} fill="none" strokeLinecap="round" />}
+      </svg>
+      <span className="flex gap-0.5" aria-hidden>
+        {[1, 2, 3].map((r) => (
+          <span key={r} className={cn("h-1.5 w-1.5 rounded-full", r <= radius ? "bg-[#ffd166]" : "bg-white/25")} />
+        ))}
+      </span>
+    </Chip>
+  );
 }
 
 function DPad({ ctrl }: { ctrl: React.RefObject<ExplorerController | null> }) {

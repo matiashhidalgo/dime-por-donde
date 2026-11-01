@@ -10,7 +10,7 @@ import { auditGame } from "../audit";
  */
 describe("generator v1 is frozen", () => {
   const golden = ["easy", "medium", "hard"].flatMap((mode) =>
-    ["AB23CD", "ZZZZZZ", "K7XQ2M"].map((seed) => encodeCode({ mode: mode as "easy", seed })),
+    ["AB23CD", "ZZZZZZ", "K7XQ2M"].map((seed) => encodeCode({ mode: mode as "easy", seed, version: 1 })),
   );
   it("golden codes keep their exact maze", () => {
     expect(Object.fromEntries(golden.map((c) => [c, fingerprint(gamesForCode(c)[0])]))).toMatchInlineSnapshot(`
@@ -37,9 +37,9 @@ describe("gamesForCode", () => {
     expect(games[0].level).toBe("medium");
   });
 
-  it("duo mode → three rounds, rising difficulty, three different themes", () => {
+  it("v1 duo mode → three rounds, rising difficulty, three different themes (in v2 that header is a Racha)", () => {
     for (const seed of ["DUDU22", "XYZ234", "MMMMMM"]) {
-      const rounds = gamesForCode(encodeCode({ mode: "duo", seed }));
+      const rounds = gamesForCode(encodeCode({ mode: "duo", seed, version: 1 }));
       expect(rounds.map((g) => g.level)).toEqual(["easy", "medium", "hard"]);
       expect(new Set(rounds.map((g) => g.theme)).size).toBe(3);
       for (const g of rounds) expect(auditGame(g).problems).toEqual([]);
