@@ -19,6 +19,7 @@ import { landmarkShapes } from "../landmark-shapes";
 
 export const CELL = 40;
 export const SWIRL_COLOR = "#7e4fc9";
+export const SHADOW_COLOR = "#46347f";
 export const MARK_COLOR = "#d9634c";
 export const PIN_COLOR = "#1f7f76";
 
@@ -148,6 +149,65 @@ export const Glyph = {
   ),
 };
 
+/**
+ * La Sombra's ROUND, never its position: a stroke along the corridors with
+ * arrowheads (one way for a loop, both ways for a there-and-back) and a dot
+ * every 4 cells to count with. Where it is right now, the pair works out by
+ * talking. No name on the map.
+ */
+export function ShadowRoute({ game, cell = CELL, paper }: { game: Game; cell?: number; paper: string }) {
+  const sh = game.shadow;
+  if (!sh) return null;
+  const g = game.grid;
+  const pts = sh.route.map((c) => [cellX(g, c) * cell + cell / 2, cellY(g, c) * cell + cell / 2] as const);
+  const closed = sh.shape === "loop";
+  const d = `M${pts.map((p) => p.join(",")).join("L")}${closed ? "Z" : ""}`;
+  const arrow = (x: number, y: number, dx: number, dy: number, key: string) => {
+    const s = cell * 0.17;
+    const px = -dy;
+    const py = dx;
+    return (
+      <polygon
+        key={key}
+        points={`${x + dx * s},${y + dy * s} ${x - dx * s * 0.6 + px * s * 0.9},${y - dy * s * 0.6 + py * s * 0.9} ${x - dx * s * 0.6 - px * s * 0.9},${y - dy * s * 0.6 - py * s * 0.9}`}
+        fill={SHADOW_COLOR}
+        stroke={paper}
+        strokeWidth={1}
+        strokeLinejoin="round"
+      />
+    );
+  };
+  const n = pts.length;
+  const marks: React.ReactNode[] = [];
+  const segs = closed ? n : n - 1;
+  for (let i = 0; i < segs; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % n];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    const dx = (b[0] - a[0]) / len;
+    const dy = (b[1] - a[1]) / len;
+    if (i % 4 === 2 || (segs < 4 && i === 0)) {
+      const mx = (a[0] + b[0]) / 2;
+      const my = (a[1] + b[1]) / 2;
+      if (closed) marks.push(arrow(mx, my, dx, dy, `a${i}`));
+      else {
+        const o = cell * 0.13;
+        marks.push(arrow(mx - dy * o, my + dx * o, dx, dy, `f${i}`), arrow(mx + dy * o, my - dx * o, -dx, -dy, `b${i}`));
+      }
+    }
+  }
+  return (
+    <g aria-hidden>
+      <path d={d} fill="none" stroke={paper} strokeWidth={cell * 0.22} strokeOpacity={0.75} strokeLinecap="round" strokeLinejoin="round" />
+      <path d={d} fill="none" stroke={SHADOW_COLOR} strokeWidth={cell * 0.08} strokeOpacity={0.85} strokeLinecap="round" strokeLinejoin="round" />
+      {marks}
+      {pts.map((p, i) =>
+        i % 4 === 0 ? <circle key={`d${i}`} cx={p[0]} cy={p[1]} r={i === 0 ? cell * 0.13 : cell * 0.09} fill={SHADOW_COLOR} stroke={paper} strokeWidth={1.2} /> : null,
+      )}
+    </g>
+  );
+}
+
 function MapArtInner({ game }: { game: Game }) {
   const g = game.grid;
   const pal = THEMES[game.theme].palette;
@@ -212,6 +272,9 @@ function MapArtInner({ game }: { game: Game }) {
       {/* Walls */}
       <path d={walls.join("")} stroke={ink} strokeWidth={3.4} strokeLinecap="round" fill="none" />
       <rect x={0} y={0} width={W} height={H} fill="none" stroke={ink} strokeWidth={5} rx={2} />
+
+      {/* La Sombra's round (v2): the route only, never where it is */}
+      <ShadowRoute game={game} paper={pal.paper} />
 
       {/* Landmarks */}
       {landmarkShapes(game).map((shape, i) => (

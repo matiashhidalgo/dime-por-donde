@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "../ui";
 import { Shape, useShake } from "../trials";
 import { CurseIcon } from "../explorer/cure-overlay";
+import { FirstHint } from "../hint";
 
 /**
  * The guide's «Maldiciones» panel (GAME_SPEC_V2.md anexo etapa 3). The guide
@@ -98,6 +99,7 @@ export function CurseSheet({ game, onClose }: { game: Game; onClose: () => void 
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
+          <FirstHint id="cure" className="mb-3" />
           <div className="flex items-center justify-between gap-3 rounded-2xl bg-background/70 p-3">
             <div>
               <p className="text-sm font-medium">¿Cuántas muescas ve?</p>

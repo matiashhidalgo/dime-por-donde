@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "stats": "vitest run src/engine/__tests__/stats.report.test.ts",
     "calibrate": "vite-node scripts/calibrate.ts",
+    "audit:variety": "vite-node scripts/audit-variety.ts",
     "brand": "vite-node scripts/render-brand.ts"
   },
   "dependencies": {

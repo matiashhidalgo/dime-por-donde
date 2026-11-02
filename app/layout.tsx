@@ -30,10 +30,18 @@ export const metadata: Metadata = {
   },
   icons: { icon: "/icon.svg", apple: "/apple-touch-icon.png" },
   robots: { index: true, follow: true },
-  appleWebApp: { title: SITE.name, statusBarStyle: "default" },
+  // «default» keeps the status bar legible on the light paper (black-translucent would put white text over it).
+  appleWebApp: { capable: true, title: SITE.name, statusBarStyle: "default" },
+  formatDetection: { telephone: false },
+  // Next only writes the standard `mobile-web-app-capable`; older iOS wants the prefixed one too.
+  other: { "apple-mobile-web-app-capable": "yes" },
 };
 
 export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // Draw under the notch and the home bar; the screens keep clear of them with env(safe-area-inset-*).
+  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f7f1e8" },
     { media: "(prefers-color-scheme: dark)", color: "#1c1920" },

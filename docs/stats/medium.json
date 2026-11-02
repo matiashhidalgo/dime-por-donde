@@ -1,7 +1,7 @@
 {
   "level": "medium",
   "games": 2000,
-  "msPerGame": 4.6,
+  "msPerGame": 17.8,
   "attempts": {
     "min": 0,
     "p5": 0,

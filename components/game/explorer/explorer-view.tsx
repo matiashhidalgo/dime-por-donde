@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUp, EyeOff, Flame, FlipHorizontal2, Gamepad2, Heart, LifeBuoy, RotateCw, Star, VenetianMask, X } from "lucide-react";
+import { ArrowLeftRight, EyeOff, Flame, FlipHorizontal2, Gamepad2, Ghost, Heart, Hourglass, LifeBuoy, RotateCw, Star, VenetianMask, X } from "lucide-react";
 import {
   DIFFICULTIES,
   type Dir,
@@ -20,23 +20,27 @@ import {
 } from "@/src/engine";
 import { audio, buzz } from "@/lib/audio";
 import { usePrefersReducedMotion } from "@/lib/hooks";
+import { type Hand, readJoystickPrefs } from "@/lib/joystick";
 import { readJSON, writeJSON } from "@/lib/storage";
 import { cn } from "@/lib/utils";
 import { ShapeGlyph } from "../guide/map-art";
+import { FullscreenButton, InstallHelp, useInstallHelp } from "../fullscreen";
 import { SoundToggle } from "../sound-toggle";
 import { Medallion } from "../trials";
 import { Button } from "../ui";
 import { ExplorerController, type HudState } from "./controller";
+import { JOY_SIZE, Joystick } from "./joystick";
 import { CURSE_NAME, createMessenger } from "./messages";
 import { CureOverlay, CurseIcon } from "./cure-overlay";
 import type { Ending } from "../screens/result";
 import { StationOverlay } from "./station-overlay";
+import { FirstHint } from "../hint";
 
 /**
  * The explorer's screen: Canvas 2.5D maze in fog + a quiet HTML HUD (hearts,
  * the candle's flame, stars, keys — shapes and colors, no names, no clock).
  * Input: arrows/WASD (hold to keep walking), swipe (swipe-and-hold walks),
- * and an optional on-screen pad.
+ * and the on-screen joystick (mano izquierda/derecha).
  */
 
 export interface ExplorerOutcome {
@@ -58,7 +62,12 @@ const KEYMAP: Record<string, Dir> = {
   ArrowDown: 2, KeyS: 2,
   ArrowLeft: 3, KeyA: 3,
 };
-const PAD_KEY = "laberinto.dpad.v1";
+/** «Esperar» (only where La Sombra roams). */
+const WAIT_KEYS = new Set(["Space", "KeyE"]);
+/** Joystick settings: { show, hand }. */
+const JOY_KEY = "laberinto.joystick.v1";
+/** The old 4-button pad's toggle: read once as a fallback for `show`, never written again. */
+const LEGACY_PAD_KEY = "laberinto.dpad.v1";
 const SWIPE_PX = 22;
 
 export function ExplorerView({
@@ -86,6 +95,8 @@ export function ExplorerView({
   const [hud, setHud] = useState<HudState | null>(null);
   const [toast, setToast] = useState<{ text: string; id: number; tone: "info" | "bad" | "good" } | null>(null);
   const [pad, setPad] = useState(false);
+  const [hand, setHand] = useState<Hand>("right");
+  const [installHelp, closeInstallHelp] = useInstallHelp();
   const [hint, setHint] = useState(true);
   /** Station whose overlay is open, or null. */
   const [trial, setTrial] = useState<number | null>(null);
@@ -96,18 +107,31 @@ export function ExplorerView({
   const onEndRef = useRef(onEnd);
   onEndRef.current = onEnd;
 
-  // Pad default: on for touch screens; remembered once toggled.
+  // Joystick: on for touch screens, right hand; remembered once changed.
+  // An old «cruceta» setting only decides whether it shows (see lib/joystick.ts).
   useEffect(() => {
     const coarse = window.matchMedia("(pointer: coarse)").matches;
-    setPad(readJSON<boolean>(PAD_KEY, coarse));
+    const prefs = readJoystickPrefs(readJSON<unknown>(JOY_KEY, null), readJSON<unknown>(LEGACY_PAD_KEY, null), coarse);
+    setPad(prefs.show);
+    setHand(prefs.hand);
   }, []);
+  const savePrefs = (show: boolean, h: Hand) => writeJSON(JOY_KEY, { show, hand: h });
   const togglePad = () => {
-    setPad((p) => {
-      writeJSON(PAD_KEY, !p);
-      return !p;
-    });
+    savePrefs(!pad, hand);
+    setPad(!pad);
   };
-
+  const swapHand = () => {
+    const h: Hand = hand === "right" ? "left" : "right";
+    savePrefs(pad, h);
+    setHand(h);
+  };
+  const onJoystick = (prev: Dir | null, next: Dir | null) => {
+    if (prev !== null) ctrlRef.current?.release(prev);
+    if (next !== null) {
+      setHint(false);
+      ctrlRef.current?.press(next, true);
+    }
+  };
   useEffect(() => {
     audio.startMusic(game.theme);
     return () => audio.stopMusic();
@@ -152,7 +176,7 @@ export function ExplorerView({
         const text = message(e, s);
         if (text) {
           const bad =
-            e.type === "fell" || e.type === "locked" || e.type === "hurt" || e.type === "darkness" || e.type === "defeat" || e.type === "dimmed" || e.type === "trialFail";
+            e.type === "fell" || e.type === "locked" || e.type === "hurt" || e.type === "shadowTouch" || e.type === "darkness" || e.type === "defeat" || e.type === "dimmed" || e.type === "trialFail";
           const good =
             e.type === "key" ||
             e.type === "star" ||
@@ -162,6 +186,7 @@ export function ExplorerView({
             e.type === "seal" ||
             e.type === "heal" ||
             e.type === "emergencyExit" ||
+            e.type === "shadowStunned" ||
             (e.type === "uncurse" && e.cured);
           setToast({ text, id: ++toastId, tone: bad ? "bad" : good ? "good" : "info" });
         }
@@ -178,6 +203,7 @@ export function ExplorerView({
       // Dev-only handles for playtesting and perf checks from the console.
       const w = window as unknown as { __explorer?: ExplorerController; __explorerSolution?: Dir[]; __explorerRoute?: (to: number) => Dir[] };
       w.__explorer = ctrl;
+      (w as { __teleport?: (c: number) => void }).__teleport = (c) => ctrl.teleportDev(c);
       w.__explorerSolution = solve(game, game.start, game.exit).dirs;
       // Shortest route from where the explorer stands now, with the keys in hand.
       w.__explorerRoute = (to: number) => solve(game, ctrl.state.cell, to, ctrl.state.keys).dirs;
@@ -197,7 +223,7 @@ export function ExplorerView({
   }, [game, reduce, startedAt]);
 
   // An open station, cure or question pauses the maze (the overlay has the keyboard).
-  const overlay = trial !== null || curing || askExit;
+  const overlay = trial !== null || curing || askExit || installHelp;
   useEffect(() => {
     if (ctrlRef.current) ctrlRef.current.paused = overlay;
   }, [overlay]);
@@ -213,6 +239,11 @@ export function ExplorerView({
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (WAIT_KEYS.has(e.code) && !e.metaKey && !e.ctrlKey && !e.altKey && !(e.target instanceof HTMLButtonElement)) {
+        e.preventDefault();
+        if (!e.repeat) ctrlRef.current?.wait();
+        return;
+      }
       const d = KEYMAP[e.code];
       if (d === undefined || e.metaKey || e.ctrlKey || e.altKey) return;
       e.preventDefault();
@@ -287,8 +318,8 @@ export function ExplorerView({
   const doorColors = [...new Set(game.doors.map((d) => d.color))].sort();
 
   return (
-    <div className="fixed inset-0 flex flex-col bg-background">
-      <header className="relative z-10 flex items-center gap-2 border-b border-border bg-card/90 px-2 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] backdrop-blur sm:px-4">
+    <main className="game-shell flex flex-col bg-background">
+      <header className="relative z-10 flex items-center gap-2 border-b border-border bg-card/90 pb-2 pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))] pt-[max(0.5rem,env(safe-area-inset-top))] backdrop-blur">
         <button onClick={onQuit} aria-label="Salir de la partida" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-border/50">
           <X size={22} />
         </button>
@@ -296,10 +327,11 @@ export function ExplorerView({
           <p className="truncate text-sm font-medium">{title}</p>
           <p className="truncate text-xs text-muted">{subtitle}</p>
         </div>
+        <FullscreenButton />
         <button
           onClick={togglePad}
           aria-pressed={pad}
-          aria-label="Mostrar cruceta en pantalla"
+          aria-label="Mostrar joystick en pantalla"
           className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border", pad ? "bg-foreground text-background" : "hover:bg-border/40")}
         >
           <Gamepad2 size={20} />
@@ -309,7 +341,8 @@ export function ExplorerView({
 
       <div
         ref={wrapRef}
-        className="relative min-h-0 flex-1 touch-none select-none overflow-hidden"
+        className={cn("relative min-h-0 flex-1 touch-none select-none overflow-hidden", pad && "has-joy")}
+        style={{ "--joy": JOY_SIZE } as React.CSSProperties}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerEnd}
@@ -320,12 +353,12 @@ export function ExplorerView({
           // «Espejo»: the explorer's world flips; the guide's map doesn't.
           className={cn("absolute inset-0 h-full w-full", mirrored && "-scale-x-100", !reduce && "transition-transform duration-500")}
           role="img"
-          aria-label="Tu alrededor en el laberinto. Muévete con las flechas, WASD, deslizando o con la cruceta."
+          aria-label="Tu alrededor en el laberinto. Muévete con las flechas, WASD, deslizando o con el joystick."
         />
 
         {/* Status chips */}
         {hud && (
-          <div className="pointer-events-none absolute inset-x-2 top-2 flex flex-wrap items-start gap-1.5 sm:inset-x-4 sm:top-3">
+          <div className="pointer-events-none absolute left-[max(0.5rem,env(safe-area-inset-left))] right-[max(0.5rem,env(safe-area-inset-right))] top-2 flex flex-wrap items-start gap-1.5 sm:top-3">
             {masked ? (
               <Chip label="Máscara: no ves tus corazones, tu vela ni tus sellos" className="bg-[#2a1840]/90">
                 <VenetianMask size={16} />
@@ -337,6 +370,7 @@ export function ExplorerView({
                 <Candle light={hud.light} radius={hud.radius} reduce={reduce} />
               </>
             )}
+            {hud.hasShadow && !masked && <ShadowChip heat={hud.heat} reduce={reduce} />}
             {emblems.length > 0 && !masked && (
               <Chip label={`Sellos: ${sealCount(hud.state)} de ${emblems.length}`} className={sealCount(hud.state) === emblems.length ? "bg-[#6b4a0c]/90" : undefined}>
                 {emblems.map((em, i) => (
@@ -409,13 +443,13 @@ export function ExplorerView({
         </div>
 
         {hint && (
-          <p className="pointer-events-none absolute inset-x-0 top-40 mx-auto w-fit rounded-full bg-black/55 px-4 py-2 text-center text-sm text-white">
-            {pad ? "Desliza o usa la cruceta · mantén para caminar" : "Flechas o WASD · mantén para caminar"}
+          <p className={cn("pointer-events-none absolute inset-x-0 mx-auto w-fit rounded-full bg-black/55 px-4 py-2 text-center text-sm text-white", hud?.hasShadow ? "top-[14rem] sm:top-40" : "top-40")}>
+            {pad ? "Desliza o usa el joystick · mantén para caminar" : "Flechas o WASD · mantén para caminar"}
           </p>
         )}
 
         {hud && canLeave && !askExit && trial === null && (
-          <div className="absolute inset-x-0 bottom-4 flex justify-center px-4" onPointerDown={(e) => e.stopPropagation()}>
+          <div className="act-bar absolute inset-x-0 flex justify-center px-4" onPointerDown={(e) => e.stopPropagation()}>
             <button onClick={() => setAskExit(true)} className="flex h-12 items-center gap-2 rounded-full bg-[#7a1f2b]/92 px-5 font-medium text-white shadow-lg">
               <LifeBuoy size={20} /> Salida de emergencia
             </button>
@@ -423,7 +457,7 @@ export function ExplorerView({
         )}
 
         {hud && hud.station >= 0 && trial === null && !hud.lost && (
-          <div className="absolute inset-x-0 bottom-4 flex justify-center px-4" onPointerDown={(e) => e.stopPropagation()}>
+          <div className="act-bar absolute inset-x-0 flex justify-center px-4" onPointerDown={(e) => e.stopPropagation()}>
             <button
               onClick={() => setTrial(hud.station)}
               className="flex h-12 items-center gap-2 rounded-full bg-[#28232e]/92 pl-2 pr-5 font-medium text-white shadow-lg"
@@ -434,7 +468,40 @@ export function ExplorerView({
           </div>
         )}
 
-        {pad && !overlay && <DPad ctrl={ctrlRef} />}
+        {hud?.hasShadow && !overlay && !hud.lost && !hud.arrived && (
+          <div className="absolute inset-x-3 top-[6.5rem] z-10 mx-auto max-w-md sm:top-16" onPointerDown={(e) => e.stopPropagation()}>
+            <FirstHint id="shadow-explorer" />
+          </div>
+        )}
+
+        {hud?.hasShadow && !overlay && !hud.lost && !hud.arrived && (
+          <div
+            className="absolute z-10"
+            style={{
+              [hand === "right" ? "left" : "right"]: `max(0.75rem, env(safe-area-inset-${hand === "right" ? "left" : "right"}))`,
+              // Level with the middle of the joystick when it shows; at the bottom otherwise.
+              bottom: pad ? `calc(max(0.25rem, env(safe-area-inset-bottom)) + 1rem + ${JOY_SIZE} / 2 - 1.5rem)` : "max(1rem, env(safe-area-inset-bottom))",
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <button
+              // Acts on press, not on click: with another finger already on the joystick
+              // the browser doesn't turn a second tap into a click. `click` with no
+              // pointer (detail 0: keyboard, screen reader) still works.
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                if (e.button === 0) ctrlRef.current?.wait();
+              }}
+              onClick={(e) => e.detail === 0 && ctrlRef.current?.wait()}
+              aria-label="Esperar un instante en el mismo sitio (tecla Espacio o E)"
+              className="flex h-12 min-w-12 items-center justify-center gap-2 rounded-full bg-black/55 px-4 text-sm font-medium text-white shadow-lg backdrop-blur-sm active:bg-black/75"
+            >
+              <Hourglass size={20} aria-hidden /> Esperar
+            </button>
+          </div>
+        )}
+
+        {pad && !overlay && <Joystick hand={hand} reduce={reduce} onDirection={onJoystick} onToggleHand={swapHand} />}
       </div>
 
       {hud && curing && curse && (
@@ -472,6 +539,8 @@ export function ExplorerView({
         </div>
       )}
 
+      {installHelp && <InstallHelp onClose={closeInstallHelp} />}
+
       {hud && trial !== null && game.stations && (
         <StationOverlay
           game={game}
@@ -482,7 +551,7 @@ export function ExplorerView({
           onClose={() => setTrial(null)}
         />
       )}
-    </div>
+    </main>
   );
 }
 
@@ -501,6 +570,32 @@ function CurseKindIcon({ kind }: { kind: CurseKind }) {
       <CurseIcon size={22} />
       <Icon size={11} className="absolute -bottom-0.5 -right-0.5 rounded-full bg-[#5b2fa0]" />
     </span>
+  );
+}
+
+const HEAT_WORDS = ["no se oye nada", "se oye lejos", "se oye cerca", "se oye muy cerca"];
+
+/**
+ * La Sombra's presence as a pulse, never as a position or a name: three dots
+ * fill as it gets near and the icon beats faster (CSS, off with reduced
+ * motion — the dots still say it). Silent for people without sound.
+ */
+function ShadowChip({ heat, reduce }: { heat: number; reduce: boolean }) {
+  const level = heat <= 0 ? 0 : heat < 0.34 ? 1 : heat < 0.67 ? 2 : 3;
+  return (
+    <Chip label={`La Sombra: ${HEAT_WORDS[level]}`} className={level === 3 ? "bg-[#2a1840]/92" : level > 0 ? "bg-[#1a1228]/85" : undefined}>
+      <Ghost
+        size={16}
+        aria-hidden
+        className={cn(level > 0 ? "text-[#d9ccff]" : "text-white/45", !reduce && level > 0 && "shadow-beat")}
+        style={!reduce && level > 0 ? { animationDuration: `${Math.round(1300 - 870 * heat)}ms` } : undefined}
+      />
+      <span className="flex gap-0.5" aria-hidden>
+        {[1, 2, 3].map((r) => (
+          <span key={r} className={cn("h-1.5 w-1.5 rounded-full", r <= level ? "bg-[#c5b6ff]" : "bg-white/25")} />
+        ))}
+      </span>
+    </Chip>
   );
 }
 
@@ -555,35 +650,3 @@ function Candle({ light, radius, reduce }: { light: number; radius: number; redu
     </Chip>
   );
 }
-
-function DPad({ ctrl }: { ctrl: React.RefObject<ExplorerController | null> }) {
-  const btn = (dir: Dir, label: string, icon: React.ReactNode, pos: string) => (
-    <button
-      aria-label={label}
-      className={cn("absolute flex h-14 w-14 items-center justify-center rounded-2xl bg-black/45 text-white shadow-md backdrop-blur-sm active:bg-black/70", pos)}
-      onPointerDown={(e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-        ctrl.current?.press(dir, true);
-      }}
-      onPointerUp={(e) => {
-        e.stopPropagation();
-        ctrl.current?.release(dir);
-      }}
-      onPointerCancel={() => ctrl.current?.release(dir)}
-      onContextMenu={(e) => e.preventDefault()}
-    >
-      {icon}
-    </button>
-  );
-  return (
-    <div className="absolute bottom-3 right-3 h-[10.5rem] w-[10.5rem]" onPointerDown={(e) => e.stopPropagation()}>
-      {btn(0, "Arriba", <ArrowUp size={24} />, "left-[3.5rem] top-0")}
-      {btn(3, "Izquierda", <ArrowLeft size={24} />, "left-0 top-[3.5rem]")}
-      {btn(1, "Derecha", <ArrowRight size={24} />, "right-0 top-[3.5rem]")}
-      {btn(2, "Abajo", <ArrowDown size={24} />, "bottom-0 left-[3.5rem]")}
-    </div>
-  );
-}
-

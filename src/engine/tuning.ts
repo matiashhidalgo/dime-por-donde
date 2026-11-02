@@ -96,6 +96,53 @@ export const TUNING = {
   },
 
   /**
+   * La Sombra (GAME_SPEC_V2.md, anexo etapa 5). A patrol that moves one step
+   * per explorer step. v2 maps only; v1 codes never have one.
+   */
+  shadow: {
+    /**
+     * Chance a v2 map has a Sombra: `base` for a single expedition; in a Racha it starts at
+     * `start` on map 0 and rises `perMap` per map, up to `cap` (same shape for `fast` and `hunter`).
+     */
+    chance: { base: 0.66, start: 0.3, perMap: 0.07, cap: 0.92 },
+    /** Patrol length in cells (a closed loop or a there-and-back). */
+    routeLength: [12, 40] as readonly [number, number],
+    /** Chance of a closed loop when the maze has one of the right length (else there-and-back). */
+    loopShare: 0.4,
+    /** Chance it moves a cell every tick (else every 2 ticks). Streak: rises per map to `cap`. */
+    fast: { base: 0.3, start: 0.1, perMap: 0.05, cap: 0.7 },
+    /** «Cazador»: chance and streak growth. */
+    hunter: { base: 0.22, start: 0.05, perMap: 0.05, cap: 0.6 },
+    /** Passage distance within which a hunter turns toward the explorer. */
+    hunterRadius: 4,
+    /** A chase lasts at most this many ticks; then it gives up and goes back to its route. */
+    chaseTicks: 8,
+    /** From this map index of a streak a second body (same route, half a lap behind) may appear… */
+    twoBodiesFrom: 5,
+    /** …with this chance (never with a hunter). */
+    twoBodiesChance: 0.5,
+    /** Touching it: hearts lost… */
+    hurt: 1,
+    /** …and this fraction of a full candle (never below empty). */
+    lightLoss: 0.15,
+    /** Ticks the explorer is immune after a touch (no chained hits). */
+    immune: 3,
+    /** Ticks the Sombra walks away from the explorer after touching. */
+    retreat: 3,
+    /** A lantern picked up stuns a Sombra within this walking distance… */
+    lanternRange: 8,
+    /** …for this many ticks (it freezes and cannot touch). */
+    lanternStun: 6,
+    /** The heartbeat is heard from this walking distance (cells). Display only. */
+    hearRange: 9,
+    /** A fair path exists with at most ceil(ratio × normal route) + slack ticks (waiting included). */
+    fairRatio: 1.5,
+    fairSlack: 3,
+    /** Seed attempts before giving up and leaving the map without a Sombra. */
+    attempts: 40,
+  },
+
+  /**
    * Racha. Two levels (anexo etapa 3): the MAP level is the map index and
    * both devices use it (it changes the map and the trials, so it can't
    * depend on anything only one device knows); the PLAY level is index +

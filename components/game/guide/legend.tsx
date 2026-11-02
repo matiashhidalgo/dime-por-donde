@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { Eraser, X } from "lucide-react";
 import { type Game, KEY_COLORS, THEMES, TUNING, cellLabel, stationEmblems } from "@/src/engine";
 import { landmarkShapes } from "../landmark-shapes";
-import { CELL, Glyph, MARK_COLOR, PIN_COLOR, ShapeGlyph } from "./map-art";
+import { CELL, Glyph, MARK_COLOR, PIN_COLOR, SHADOW_COLOR, ShapeGlyph } from "./map-art";
 
 /**
  * Legend + lookups for THIS map. Only what each symbol DOES (v2: no names for
@@ -65,9 +65,22 @@ export function Legend({
               <Item icon={icon(Glyph.swirl(0, 0, R * 0.85, true))} label="Remolino doble: todo al revés" />
             )}
             <Item icon={icon(Glyph.star(0, 0, R * 1.1))} label="Estrella" />
+            {game.shadow && (
+              <Item
+                icon={icon(
+                  <>
+                    <path d={`M${-R * 1.3},0H${R * 1.3}`} stroke={SHADOW_COLOR} strokeWidth={2.6} strokeLinecap="round" />
+                    <polygon points={`${R * 0.5},-5 ${R * 0.5},5 ${R * 1.1},0`} fill={SHADOW_COLOR} />
+                    <circle cx={-R * 1.1} r={3.5} fill={SHADOW_COLOR} />
+                  </>,
+                )}
+                label="Ronda de una Sombra: da un paso cuando el explorador da uno. Un punto cada 4 casillas"
+              />
+            )}
           </ul>
           <p className="mt-3 rounded-xl bg-background/70 p-3 text-xs leading-relaxed text-muted">
             {TUNING.hearts} corazones compartidos. La vela del explorador se gasta al caminar: tú no la ves, pregúntale. Sin corazones, se acaba la expedición.
+            {game.shadow && " Tocar a la Sombra cuesta un corazón y algo de vela. No sabes dónde está ahora: cuéntense lo que el explorador ve y oye (su latido), y esperen si hace falta."}
           </p>
         </section>
 

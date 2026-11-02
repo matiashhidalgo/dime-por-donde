@@ -26,6 +26,7 @@ import { Button } from "../ui";
 import { type PianoAttempt, PianoListen, PianoPlay } from "../piano";
 import { TangramBoard, TangramSilhouette } from "../tangram";
 import { ClueGrammar, CluePictogram, Medallion, Shape, TRIAL_TITLES, useShake } from "../trials";
+import { FirstHint } from "../hint";
 
 /**
  * The guide's side of the stations (GAME_SPEC_V2.md anexo etapa 2). The two
@@ -110,7 +111,7 @@ export function StationsBar({
         onClick={onToggle}
         aria-expanded={open}
         aria-label={`Estaciones: ${won} de ${emblems.length} sellos marcados. ${open ? "Plegar" : "Desplegar"}`}
-        className="flex min-h-9 items-center gap-1 rounded-full px-2 text-[10px] font-semibold uppercase tracking-widest text-muted hover:bg-border/50"
+        className="flex min-h-11 items-center gap-1 rounded-full px-2 text-[10px] font-semibold uppercase tracking-widest text-muted hover:bg-border/50"
       >
         Estaciones <span className="tabular-nums normal-case">{won}/{emblems.length}</span>
         <ChevronDown size={14} className={cn("transition-transform", open && "rotate-180")} aria-hidden />
@@ -176,6 +177,7 @@ export function StationSheet({
           </button>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-4">
+          <FirstHint id={`trial-${station.kind}`} className="mb-3" />
           {station.kind === "lock" ? (
             <GuideLock game={game} station={station} />
           ) : station.kind === "piano" ? (

@@ -34,7 +34,7 @@ export function CodeDisplay({ code, size = "lg" }: { code: string; size?: "md" |
 
   return (
     <div className="flex flex-col items-center gap-3">
-      <div className="flex items-center gap-2 sm:gap-3" aria-label={`Código ${code.split("").join(" ")}`}>
+      <div role="group" className="flex items-center gap-2 sm:gap-3" aria-label={`Código ${code.split("").join(" ")}`}>
         {groups.map((g, gi) => (
           <div key={gi} className="flex gap-1 sm:gap-1.5">
             {g.split("").map((ch, i) => (

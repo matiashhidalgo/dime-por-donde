@@ -1,7 +1,7 @@
 {
   "level": "easy",
   "games": 2000,
-  "msPerGame": 1.2,
+  "msPerGame": 7.1,
   "attempts": {
     "min": 0,
     "p5": 0,

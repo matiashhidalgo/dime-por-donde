@@ -3,6 +3,7 @@ import { DIRS, type Dir, bfs, isOpen, neighbor } from "./grid";
 import { createRng, hashString } from "./rng";
 import { canReach, stateGraph } from "./reach";
 import { invertDir, isLockedFor, resolveMove } from "./rules";
+import { type ShadowRun, advanceBody, initShadowRun, retreat, shadowWorld, stunNear, touches } from "./shadow";
 import { TUNING } from "./tuning";
 import type { LockFeedback } from "./lock";
 import type { Game } from "./types";
@@ -100,6 +101,12 @@ export interface PlayState {
   cured: number;
   /** v2: bitmask of seals won (station indices). */
   seals: number;
+  /** v2: La Sombra's bodies, if this map has one (moves only when the explorer does). */
+  shadow: ShadowRun | null;
+  /** Ticks so far: inputs that went somewhere or waited. What the Sombra's clock counts. */
+  ticks: number;
+  /** Times it touched the explorer. */
+  touches: number;
   /** v2: what happened at each station so far (survives leaving and coming back). */
   trials: TrialProgress[];
   /** SEEN | VISITED | PIT_KNOWN per cell. */
@@ -127,7 +134,7 @@ export interface TrialProgress {
   melodies: { answer: number[]; right: number }[];
 }
 
-export type HurtCause = "pit" | "dark" | "trial";
+export type HurtCause = "pit" | "dark" | "trial" | "shadow";
 
 export type PlayEvent =
   | { type: "blocked" }
@@ -147,6 +154,9 @@ export type PlayEvent =
   | { type: "unswirl" }
   | { type: "curse"; k: number; kind: CurseKind; steps: number }
   | { type: "uncurse"; k: number; cured: boolean }
+  | { type: "shadowTouch"; hearts: number }
+  | { type: "shadowStunned"; count: number }
+  | { type: "waited" }
   | { type: "emergencyExit"; seals: number }
   | { type: "arrived" }
   | { type: "defeat"; cause: HurtCause }
@@ -167,7 +177,7 @@ export interface StepResult {
    * cells, then (on a teleport) the partner portal, or (on a fall) the pit.
    */
   trail: number[];
-  outcome: "blocked" | "locked" | "moved" | "teleported" | "fell";
+  outcome: "blocked" | "locked" | "moved" | "teleported" | "fell" | "waited";
 }
 
 /**
@@ -196,6 +206,9 @@ export function createPlay(game: Game, opts: { hearts?: number; level?: number }
     curses: 0,
     cured: 0,
     seals: 0,
+    shadow: game.shadow ? initShadowRun(game.shadow) : null,
+    ticks: 0,
+    touches: 0,
     trials: (game.stations ?? []).map(() => ({ fails: 0, paid: 0, wrong: [], guesses: [], keyErrors: 0, melodies: [] })),
     memo,
     moves: 0,
@@ -350,7 +363,7 @@ export function stepPlay(game: Game, prev: PlayState, input: Dir): StepResult {
     return { state: prev, events: [{ type: "locked", color: r.lockedColor!, cell }], dir, trail: [], outcome: "locked" };
   }
 
-  const s: PlayState = { ...prev, memo: prev.memo.slice(), moves: prev.moves + 1 };
+  const s: PlayState = { ...prev, memo: prev.memo.slice(), moves: prev.moves + 1, ticks: prev.ticks + 1 };
   const events: PlayEvent[] = [];
   const trail = [...r.trail];
   const radiusBefore = visionRadius(prev);
@@ -387,6 +400,7 @@ export function stepPlay(game: Game, prev: PlayState, input: Dir): StepResult {
       s.curse = null;
     }
     hurt(s, "pit", events);
+    if (!s.lost) tickShadow(game, s, [...trail, s.cell], events);
     if (!s.lost) burn(s, events, radiusBefore, prev.light > 0);
     markSeen(game, s);
     return { state: s, events, dir, trail, outcome: "fell" };
@@ -412,7 +426,8 @@ export function stepPlay(game: Game, prev: PlayState, input: Dir): StepResult {
     }
     const st = game.stations?.find((x) => x.cell === s.cell);
     if (st) events.push({ type: "station", index: st.index, sealed: !!(s.seals & (1 << st.index)) });
-    burn(s, events, radiusBefore, prev.light > 0);
+    tickShadow(game, s, trail, events);
+    if (!s.lost) burn(s, events, radiusBefore, prev.light > 0);
     if (atExit && s.cell === game.exit) {
       const ev = events.find((e) => e.type === "exitSealed");
       if (ev && ev.type === "exitSealed") ev.emergency = emergencyAvailable(game, s);
@@ -420,6 +435,61 @@ export function stepPlay(game: Game, prev: PlayState, input: Dir): StepResult {
   }
   markSeen(game, s);
   return { state: s, events, dir, trail, outcome: r.outcome };
+}
+
+/**
+ * Stands still for one tick (only on maps with a Sombra): the candle burns as
+ * for a step and the Sombra moves, so waiting out a patrol has a price.
+ */
+export function waitPlay(game: Game, prev: PlayState): StepResult {
+  const none: StepResult = { state: prev, events: [], dir: 2, trail: [], outcome: "blocked" };
+  if (prev.arrived || prev.lost || !game.shadow || !prev.shadow) return none;
+  const s: PlayState = { ...prev, memo: prev.memo.slice(), ticks: prev.ticks + 1 };
+  const events: PlayEvent[] = [{ type: "waited" }];
+  const radiusBefore = visionRadius(prev);
+  if (s.invert) {
+    const left = s.invert.left - 1;
+    s.invert = left > 0 ? { ...s.invert, left } : null;
+    if (!s.invert) events.push({ type: "unswirl" });
+  }
+  if (s.curse) {
+    const left = s.curse.left - 1;
+    if (left > 0) s.curse = { ...s.curse, left };
+    else {
+      events.push({ type: "uncurse", k: s.curse.k, cured: false });
+      s.curse = null;
+    }
+  }
+  s.light = Math.max(0, s.light - (prev.curse?.kind === "hungry" ? TUNING.curse.hungryBurn : 1));
+  tickShadow(game, s, [s.cell], events);
+  if (!s.lost) burn(s, events, radiusBefore, prev.light > 0);
+  markSeen(game, s);
+  return { state: s, events, dir: 2, trail: [], outcome: "waited" };
+}
+
+/**
+ * One tick for La Sombra, after the explorer's move. `crossed` = every cell the
+ * explorer passed through (so a slide or a swap can't skip through a body).
+ * A touch costs a heart and part of the candle, makes the explorer immune for a
+ * few ticks and sends the body walking away.
+ */
+function tickShadow(game: Game, s: PlayState, crossed: readonly number[], events: PlayEvent[]): void {
+  const run = s.shadow;
+  const sh = game.shadow;
+  if (!run || !sh) return;
+  const w = shadowWorld(game);
+  const moved = run.bodies.map((b) => advanceBody(w, sh, b, s.cell));
+  const hit = run.immune === 0 && touches(run.bodies.map((b) => b.cell), moved.map((b) => b.cell), crossed);
+  if (!hit) {
+    s.shadow = { bodies: moved, immune: Math.max(0, run.immune - 1) };
+    return;
+  }
+  const bodies = moved.map((b, i) => (crossed.includes(run.bodies[i].cell) || crossed.includes(b.cell) ? retreat(b, TUNING.shadow.retreat) : b));
+  s.shadow = { bodies, immune: TUNING.shadow.immune };
+  s.touches++;
+  s.light = Math.max(0, s.light - Math.round(s.rules.maxLight * TUNING.shadow.lightLoss));
+  events.push({ type: "shadowTouch", hearts: Math.max(0, s.hearts - TUNING.shadow.hurt) });
+  for (let i = 0; i < TUNING.shadow.hurt && !s.lost; i++) hurt(s, "shadow", events);
 }
 
 export function hurt(s: PlayState, cause: HurtCause, events: PlayEvent[]): void {
@@ -481,6 +551,11 @@ function pickUp(game: Game, s: PlayState, c: number, events: PlayEvent[]): void 
         s.lanterns |= 1 << o.index;
         refill(s, TUNING.candle.lanternRefill);
         events.push({ type: "lantern", index: o.index });
+        if (s.shadow) {
+          const r = stunNear(game, s.shadow, s.cell, TUNING.shadow.lanternRange, TUNING.shadow.lanternStun);
+          s.shadow = r.run;
+          if (r.stunned > 0) events.push({ type: "shadowStunned", count: r.stunned });
+        }
       }
       break;
     case "checkpoint":

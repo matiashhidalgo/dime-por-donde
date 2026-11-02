@@ -20,6 +20,7 @@ import {
 } from "./place";
 import { type Rng, createRng, hashString } from "./rng";
 import { routeDecisions, routeEffort, solve } from "./solver";
+import { withShadow } from "./shadowaudit";
 import { withStations } from "./stations";
 import { THEMES, THEME_IDS, type ThemeId } from "./themes";
 import type { Game, GameStats } from "./types";
@@ -55,7 +56,7 @@ export function generateGame(input: GenerateInput): Game {
     for (let variant = 0; ; variant++) {
       const seed = variant === 0 ? input.seed : `${input.seed}~${variant}`;
       const game = withStations({ ...generateGame({ ...input, seed, version: 1 }), version: 2 });
-      if (game) return game;
+      if (game) return withShadow(game);
     }
   }
   if (version !== 1) throw new Error(`generator v${version} not available`);
@@ -266,6 +267,10 @@ export function fingerprint(game: Game): string {
     // v2+ only, so v1 fingerprints (golden) are untouched.
     ...(game.stations ? [game.stations.map((s) => `${s.cell}${s.kind}${s.direction}`).join(",")] : []),
     ...(game.streak ? [`streak${game.streak.index}`] : []),
+    // La Sombra (v2 maps that have one): its patrol is part of what both devices must share.
+    ...(game.shadow
+      ? [`shadow${game.shadow.route.join(".")}:${game.shadow.shape}${game.shadow.slow}${game.shadow.phase}${game.shadow.hunter ? "h" : ""}${game.shadow.bodies}`]
+      : []),
   ].join("|");
   const h1 = hashString(parts).toString(16).padStart(8, "0");
   const h2 = hashString(`salt:${parts}`).toString(16).padStart(8, "0");

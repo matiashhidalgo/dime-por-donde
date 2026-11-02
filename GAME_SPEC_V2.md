@@ -2,6 +2,25 @@
 
 > Fuente de verdad de las etapas 1 a 6 del rediseño. `GAME_SPEC.md` sigue describiendo v1 (motor, generador v1 congelado y sus anexos); donde ambas difieran, manda esta.
 
+## Resumen consolidado (v2 final: etapas 1 a 6)
+
+**Qué es.** Juego web cooperativo asimétrico para dos personas en videollamada, sin backend (Next.js estático + TypeScript). Un **Explorador** ve su vela entre la niebla; una **Guía** ve el mapa completo pero no sabe dónde está el explorador. Se sincronizan **solo por voz**: el código de partida de 8 caracteres, el sello «Bosque · 7F3K», las claves de sello (6), de cura (4) y de relevo (9) se dictan.
+
+**Una expedición.** Un laberinto Difícil con **3 estaciones** (3 pruebas distintas de 4: figuras raras, cerradura de deducción, piano de la bruja, tangram a ciegas) que guardan **3 sellos**; con los tres se abre la salida. **3 corazones compartidos**; la **vela** se gasta con los pasos y achica la visión (3 → 2 → 1 → oscuridad; a oscuras, un margen y luego un corazón). El **pozo** cuesta un corazón y las llaves y deja lejos. Pisar un **remolino** lanza una **maldición** (giro, ceguera, hambre, máscara, espejo) que se cura con una microprueba que resuelve la guía. **La Sombra** (etapa 5): una patrulla que da un paso por cada paso del explorador, con su ronda dibujada en el mapa de la guía pero no su posición; el explorador oye su latido; tocarla cuesta un corazón y vela; el farol la aturde; «Esperar» es una acción. Sin cronómetro ni nombres de objetos.
+
+**Finales.** Victoria (3 sellos y salida), **salida de emergencia** (1 o 2 sellos, solo en peligro) y **atrapados** (0 corazones). **Racha**: mapas encadenados con corazones que se arrastran, roles que se intercambian, escalada con tope y **clave de relevo**.
+
+**Rejugabilidad (prioridad 1).** Todo lo que se ve u oye en una prueba, y la Sombra misma, se **genera por semilla** (§7). Auditorías: `npm run audit:variety` → `docs/AUDIT.md`; tests con 5.000 semillas por prueba; prueba de «uso prolongado» (200 expediciones seguidas); variedad de textos (≥ 8 variantes por evento, ≥ 12 por final).
+
+**Reglas técnicas.** Lógica pura en `src/engine`; constantes de balance en `src/engine/tuning.ts`; el generador v1 y sus huellas golden no se tocan; los cambios de reglas suben `RULES_VERSION` (hoy **5**, en `components/game/session.ts`) y cambian el sello.
+
+**Balance medido (simulación, `npm run calibrate`).** Partida única: competente 80 %, normal 49 %, despistada 16 %. Racha (mediana de mapas): competente 6, normal 3, despistada 0. Metas: ≈ 80–85 / 50–55 y 5–7 / 3–4; la despistada no se toca a propósito. Detalle y «antes/después» en el anexo de la etapa 5. **No hay datos de parejas reales**: `PLAYTEST.md` los pide.
+
+**Dónde mirar.** Reglas: `src/engine/play.ts`, `shadow.ts`, `shadowaudit.ts`, `stations.ts`, `streak.ts`, `curses.ts`. Pruebas: `figures.ts`, `lock.ts`, `piano.ts`, `tangram.ts`. Constantes: `tuning.ts`. Cómo se juega, recalibrar y auditar: `README.md`. Publicar: `docs/PUBLICAR.md`. Informe de esta entrega: `docs/INFORME_NUBE.md`.
+
+
+---
+
 ## 0. Prioridades (en este orden)
 1. **Rejugabilidad:** tiene que seguir siendo divertido en la partida 100, no solo en las primeras. Toda decisión se evalúa contra la sección 7.
 2. **Que ambos DESCIFREN y se comuniquen.** Nadie puede avanzar solo leyendo un texto o un manual largo.
@@ -579,3 +598,97 @@ Sin cambios de ajuste: todo queda dentro de las metas.
 - El mapa v1 no cambia: las pruebas se sortean en flujos de azar propios de v2 (`seed|v2|station-kinds`, `seed|v2|station|i`). Los tests de «mismo código → mismo laberinto» y la auditoría del generador siguen en verde.
 - Las claves de almacenamiento v1 no se tocaron. Solo cambió el cuaderno de estaciones de la guía, que es de v2 (`.v1` → `.v2`).
 - Un dispositivo con el despliegue anterior (`RULES_VERSION` 3) puede sortear otras pruebas con el mismo código. Por eso la frase del sello («Bosque · 7F3K») cambia con `RULES_VERSION` 4: si los dos leen frases distintas, saben que uno tiene otra versión antes de jugar.
+
+---
+
+## Anexo etapa 5: LA SOMBRA (diseño y decisiones; los números medidos están más abajo)
+
+### Modelo (`src/engine/shadow.ts`, `shadowaudit.ts`)
+- **Ticks, no relojes.** La Sombra solo se mueve cuando el explorador gasta un *tick*: cada movimiento que va a alguna parte (deslizarse por hielo, un portal o caer cuentan **uno**) y la nueva acción **«Esperar»** (quieto un tick; botón y teclas Espacio/E). Los choques contra paredes o puertas cerradas no cuentan. Con una estación o una cura abierta no hay ticks (esas pantallas no llaman a `stepPlay`). «Esperar» gasta vela como un paso y hace avanzar maldiciones: esperar a que pase una ronda tiene precio.
+- **Ronda.** Un `Shadow` es parte del `Game` (solo v2; un código v1 nunca lo tiene): ruta de 12 a 40 casillas por pasillos, sobre suelo liso (sin objetos que la bloqueen, hielo, pozos, puertas, portales ni remolinos) y **nunca en la entrada, la salida, una estación ni las 8 casillas que las rodean**. Dos formas: **bucle** (ciclo real por un lazo del laberinto: la ruta más corta alrededor de una arista cuyo largo cae en el rango) o **ida y vuelta** (camino simple por búsqueda en profundidad con presupuesto, que insiste en el largo sorteado). Velocidad: 1 casilla por tick o por 2. Fase inicial: uniforme sobre el ciclo. Posición = función del reloj de patrulla (`patrolCell`), que solo avanza con ticks.
+- **Cuerpos.** Uno; desde el mapa `twoBodiesFrom` de una Racha, con probabilidad, dos que comparten ruta media vuelta desfasados (nunca con cazador).
+- **Mutador «cazador».** Si un explorador queda a ≤ `hunterRadius` casillas **por pasillos**, la Sombra deja su ruta y avanza hacia él hasta `chaseTicks` ticks; luego (o si lo pierde a más de radio + 1) vuelve por el camino más corto a la casilla de su ruta más cercana y retoma la patrulla desde ahí. Determinista dado el recorrido del explorador. Nunca entra en las casillas prohibidas.
+- **Contacto.** Se compara, tras cada tick, si algún cuerpo estaba antes o está después en alguna casilla que el explorador cruzó (así un deslizamiento o un cruce frente a frente no se «saltan» a la Sombra). Efecto: −`hurt` corazón (causa `shadow`), −`lightLoss` de vela, **inmunidad** de `immune` ticks (sin golpes encadenados) y el cuerpo **se retira** `retreat` casillas lejos del explorador y vuelve a su ruta.
+- **Farol.** Recoger un farol aturde (congela) `lanternStun` ticks a los cuerpos a ≤ `lanternRange` casillas por pasillos: da valor táctico al farol (hay que pensarlo, no solo recargar).
+- **Una sola función de avance.** `advanceBody` mueve a la Sombra en la partida y en la auditoría: lo que se demuestra es lo que se juega.
+
+### Equidad (auditoría obligatoria, `auditShadow`)
+Búsqueda de camino más corto en el **espacio expandido en el tiempo**: estados (casilla, llaves, estado de la Sombra), con *esperar* como acción y los mismos movimientos que usa el solucionador (portales, hielo, llaves). Estado de la Sombra: sin cazador, el reloj módulo el período (matriz tipada, ~8 ms); con cazador, el cuerpo completo (modo, casilla, cuenta de persecución, cadencia; ~55 ms de media, máx. ~0,3 s). Exigencia: desde la entrada, **a cada estación y a la salida** existe un camino sin tocar ningún cuerpo de longitud ≤ ⌈1,5 × la ruta normal⌉ + `fairSlack` (3) ticks. Si una semilla no pasa se reintenta de forma determinista (`semilla|v2|shadow|intento`, hasta `attempts` 40); si ninguna pasa, el mapa queda **sin Sombra** (`shadowSkip: "audit"`, cuenta en las estadísticas). Una casilla crítica nunca está «permanentemente ocupada»: la Sombra no puede pisar ninguna y, si su ronda cruza el único pasillo, la auditoría lo detecta (test con un pasillo de una casilla de ancho).
+No cubre: el explorador **después de una caída** (aparece en un punto lejano; tocarla cuesta un corazón y nunca deja la partida sin salida) ni caminos entre estaciones; se documenta como límite conocido.
+
+### Se sortea o no
+`seed|v2|shadow|exists` decide si el mapa tiene Sombra (≈ 66 % en partida única); es un sorteo aparte para que un reintento de la ruta no lo cambie. **Racha:** la probabilidad parte de `start` en el mapa 0 y sube `perMap` por mapa hasta `cap` (también la de velocidad 1 y la del cazador); a partir del mapa 5 puede haber dos cuerpos. Valores en `TUNING.shadow` (`chance`, `fast`, `hunter`).
+
+### Vistas
+- **Explorador:** silueta oscura procedural (misma maquinaria que los puntos de referencia, con ojos), solo dentro de su radio de visión (la niebla la oculta; la maldición de ceguera lo reduce a 1); latido WebAudio («lub-dub» más rápido, más grave y más fuerte cuanto más cerca **por pasillos**), pulso del HUD (icono y tres puntos) y de la viñeta, vibración (`navigator.vibrate`) si hay soporte; con `prefers-reduced-motion` no hay balanceo ni animación CSS (los puntos del HUD y un pulso más suave siguen diciendo la cercanía); con el sonido apagado el pulso visual basta. Botón **Esperar** (≥ 44 px). Sin nombre: «algo ronda».
+- **Guía:** su mapa dibuja la **ronda** (trazo con flechas de un solo sentido en un bucle, de ida y vuelta en el otro; un punto cada 4 casillas para contar) **pero no su posición actual**. Leyenda con texto de mecánica genérico. No ve la velocidad, el mutador ni cuántos cuerpos son: lo deduce hablando.
+- **Sellos y versión:** `RULES_VERSION` 5. La huella del juego (`fingerprint`, solo v2) incluye la ronda, así que el sello «Bosque · 7F3K» cambia si dos dispositivos difieren en la Sombra.
+
+### Anti-memorización: ¿qué recordaría alguien tras 50 partidas que le ahorre pensar?
+- Que existe y que se mueve con los pasos: es la interfaz, como saber que un pozo duele.
+- **Nada de la ronda:** ruta, forma (bucle o ida y vuelta), largo, velocidad, fase, cazador, número de cuerpos y su cara cambian por partida y por mapa (y la ruta depende del laberinto, que no se repite). No hay plantilla de patrulla.
+- **Nada de la fase:** el arranque es uniforme sobre el ciclo; las características simples (largo, forma, velocidad, cazador, dónde empieza la ruta) no la predicen (tests con 5.000 sorteos).
+- Lo que sí se aprende es leer el latido, contar las casillas con los puntos del trazo y decidir cuándo esperar: habilidad.
+- **Espacio de instancias** (estimación gruesa, detalle en `docs/AUDIT.md`): ≳ 10⁷ rondas por laberinto (≈ 10³–10⁴ rutas de 12–40 casillas × 2 formas × 2 velocidades × fase ≈ 10–160 × cazador), y el laberinto aporta otro ≳ 10⁹.
+
+## Resultado etapa 5 (medido, después de programar)
+
+### Decisiones al implementar
+- **«Esperar» es una acción propia** (no un paso de ida y vuelta): con solo pasos, en un callejón la paridad del tick decide si se puede esquivar. Cuesta vela como un paso; solo existe donde hay Sombra.
+- **Ruta de ida y vuelta por DFS con presupuesto**, no por caminata aleatoria: una caminata se atascaba en callejones y el 18 % de las rutas medía 12 (ahora 29 largos distintos y el más común, 12 casillas, es el 9,8 %: los bucles se agrupan en 12–16 porque el laberinto no tiene ciclos largos en todas partes).
+- **La Racha arranca suave** (`chance.start` 0,30; `fast.start` 0,10; `hunter.start` 0,05): con la probabilidad de la partida única en el mapa 0, la mediana de la pareja normal cayó de 3 a 2 mapas.
+- **El modelo de simulación** (`shadowDodge` por perfil: 0,8 / 0,55 / 0,3, ×0,6 contra un cazador, hasta 6 esperas seguidas): antes de un paso que tocaría a la Sombra la pareja lo nota con esa probabilidad y espera; si no, la toca. Es un supuesto de modelado (la pareja oye el latido y la guía conoce la ronda), no una constante del juego; solo una pareja real lo corrige (PLAYTEST).
+- La causa `shadow` es un `HurtCause` más (el mensaje de dolor genérico se omite: lo cubre el del contacto).
+
+### Calibración (`npm run calibrate 1000` y `npm run calibrate 300 streak`)
+Antes = etapa 4 (sin Sombra, medido en el mismo entorno con el mismo código base). Después = con Sombra y los valores finales de `tuning.ts`.
+
+**Partida única (1.000 mapas Difícil v2)**
+
+| Pareja | Gana antes → después | Sin daño | ♥ al ganar | Caídas | Toques por mapa con Sombra | Esperas | Gana con Sombra | Gana sin Sombra |
+|---|---|---|---|---|---|---|---|---|
+| Competente | 83 % → **80 %** | 69 → 65 % | 2,77 → 2,74 | 0,83 → 0,81 | 0,32 | 0,4 | 78 % | 84 % |
+| Normal | 52 % → **49 %** | 39 → 35 % | 2,61 → 2,58 | 1,68 → 1,60 | 0,38 | 0,2 | 46 % | 54 % |
+| Despistada | 17 % → 16 % | 10 → 9 % | 2,30 → 2,28 | 2,10 → 1,96 | 0,40 | 0,1 | 16 % | 15 % |
+
+**Racha (300 rachas por pareja)**
+
+| Pareja | Mediana antes → después | p25–p75 | Media antes → después | ≥ 5 mapas antes → después |
+|---|---|---|---|---|
+| Competente | 7 → **6** | 5–9 → 4–7 | 6,75 → 5,72 | 76 → 69 % |
+| Normal | 3 → **3** | 1–4 → 1–4 | 3,01 → 2,85 | 24 → 22 % |
+| Despistada | 0 → 0 | 0–1 → 0–1 | 0,68 → 0,63 | 0 → 0 % |
+
+Metas: competente ≈ 80–85 % y normal ≈ 50–55 % (partida única; la normal queda 1 punto abajo, dentro del ruido de 1.000 mapas, ±1,6); competente ≈ 5–7 y normal ≈ 3–4 mapas en la Racha (cumplidas). La despistada no se tocó. **Lo único que se reajustó** fue el arranque de la Racha (sin él, normal = 2 mapas, 300 rachas). Probado sin efecto: `lightLoss` 0,15 → 0,10 y 0,08, `immune` 3 → 4, subidas más lentas por mapa: casi no mueven nada porque las partidas con Sombra se pierden por el corazón del toque, no por la vela.
+
+### Estadísticas de generación (3.000 sorteos sobre 60 mapas reales, mismo `withShadow` del juego)
+Con Sombra 66,5 % (objetivo ≈ 66 %); la auditoría dio por perdido el mapa en **0 de 3.000**; el primer intento pasó en el 99,1 % (los demás reintentaron, media 0,009 intentos extra); peor razón camino seguro / normal 1,64 (el límite es ⌈1,5·N⌉ + 3, así que rutas cortas pueden pasar de 1,5); bucles 31 %, cazadores 22 %, rápidas 30 %; 29 largos de ruta distintos (el más común, 12 casillas, 9,8 %); sorteos idénticos en el mismo laberinto (ruta + forma + velocidad + fase + mutadores): **0 de ≈ 2.000**; misma ruta sobre el mismo laberinto con otra fase: 2,1 % (cuenta de cumpleaños: ~50 sorteos por laberinto del grupo, un laberinto nunca se repite). Tiempo de `withShadow` (sorteo + auditoría): media 25 ms, máx. ≈ 1,1 s (un cazador con muchos estados; en un teléfono lento puede notarse al empezar).
+
+### Anti-memorización medida (5.000 sorteos, `shadow-antimemo.test.ts`)
+- (a) Colisión de instancias idénticas < 0,1 %.
+- (b) Fase inicial uniforme (χ² sobre 8 tramos del ciclo < crítico p = 0,001); la casilla de arranque no está fija en la ruta.
+- (c) Ningún clasificador trivial (largo, forma, velocidad, cazador, dónde empieza la ruta, período) predice el cuarto de la fase por encima de 25 % + 5 pts, ni el cuadrante de la ruta por encima de la clase mayoritaria + 5 pts.
+- (d) La auditoría de equidad pasa en el 100 % de los mapas con Sombra (los que no pasan, por construcción, no la llevan).
+- Mutadores presentes con frecuencias razonables (velocidad 1 ≈ 30 %, cazador ≈ 22 %, bucle > 10 %); en partida única nunca hay dos cuerpos.
+
+---
+
+## Anexo etapa 6: auditoría global, onboarding y cierre
+
+- **`npm run audit:variety [N] [--write]`** (`scripts/audit-variety.ts`) ejecuta las pruebas de diversidad de **todas** las pruebas (figuras, cerradura, piano, tangram, sigilo, eco, la Sombra) más claves de sello, emblemas y juegos de glifos, estima el espacio de instancias y escribe `docs/AUDIT.md`.
+- **Uso prolongado** (`longuse.test.ts`): un mismo dispositivo juega 200 expediciones seguidas (160 únicas y 40 Rachas de 3 mapas) con los códigos del propio `createCode` y su historial; no se repite ningún código, laberinto, instancia de prueba, trío de emblemas, juego de glifos, juego de siluetas, cura, ronda ni la clave que abre cada estación. Las 30 claves de cada partida chocan solo por azar (29⁵ posibles); las curas son de 4 caracteres a propósito y también chocan por azar.
+- **Textos.** Bolsas de barajado (`lib/lines.ts`): una línea no vuelve hasta haber salido todas; ≥ 8 variantes por evento común (con plantillas apertura × cola donde conviene) y ≥ 12 por final (victoria, salida de emergencia, atrapados, fin de racha; en realidad 24 por situación). Los dos dispositivos de una pareja pueden leer líneas distintas del mismo final (nada depende de que coincidan); una pantalla que se redibuja conserva su línea (memoria por semilla). Tests: `variety.test.ts` (50 partidas simuladas sin repetición seguida ni línea que acapare) y `lines.test.ts`.
+- **Onboarding.** «Cómo se juega» en 4 tarjetas, saltable y recordada en `localStorage` (clave `laberinto.hints.v1`, con try/catch); botón «Cómo se juega» siempre en el inicio. Pista de una frase la **primera vez** que aparece cada tipo de prueba (figuras, cerradura, piano, tangram), la cura, La Sombra (explorador y guía) y la clave de relevo; descartable y no vuelve sola.
+- **QA.** Ver `docs/INFORME_NUBE.md` (casos borde, limpieza tras varias partidas, accesibilidad, rendimiento, capturas en `docs/capturas/`).
+
+---
+
+## Anexo de la etapa 7: interfaz para teléfono (sin cambios de reglas)
+
+Solo interfaz. **No** cambian reglas, motor ni `RULES_VERSION` (sigue en 5); el sello y los códigos son los mismos.
+
+- **Joystick** (`lib/joystick.ts` puro, `components/game/explorer/joystick.tsx`): sustituye a la cruceta de 4 botones. Salida de 4 direcciones por eje dominante; zona muerta 25 % del radio de la base (suelta al bajar de 18 %); para cambiar de eje el otro debe ganar por ×1,4 (banda de ±9,5° alrededor de la diagonal). Mantener = caminar continuo (el mismo `press(dir, true)` del deslizar). Captura de puntero con su propio `pointerId`; no deja pasar eventos al lienzo (deslizar y joystick son excluyentes). Mano izquierda/derecha en `laberinto.joystick.v1` (`{show, hand}`); el ajuste antiguo `laberinto.dpad.v1` solo decide `show` si no hay uno nuevo y cualquier valor raro se ignora. Fijo (no flotante).
+- **«Esperar»** actúa al pulsar (`pointerdown`), no al `click`: con otro dedo ya en el joystick el navegador no genera el `click` del segundo toque. La activación sin puntero (teclado, lector de pantalla) sigue por `click`.
+- **Pantalla completa** (`lib/display.ts`, `components/game/fullscreen.tsx`): Fullscreen API con prefijos y `try/catch`; en iPhone una ayuda única (`laberinto.install-help.v1`) a «Agregar a pantalla de inicio», que no sale en modo standalone.
+- **Manifest** (`app/manifest.ts`, `force-static`) con `display: "fullscreen"`, `display_override`, íconos 192/512/maskable (`npm run brand`); `viewport-fit=cover`; `mobile-web-app-capable` y `apple-mobile-web-app-capable`.
+- No se añaden nombres de objetos ni emoji: íconos de `lucide-react` y SVG propio.

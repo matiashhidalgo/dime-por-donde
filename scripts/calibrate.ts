@@ -12,10 +12,13 @@
 import { PROFILES, TUNING, createRng, generateGame, simulatePair, simulateStreak } from "../src/engine";
 import type { Game, PairProfile } from "../src/engine";
 
+// Try a setting without editing tuning.ts: SHADOW='{"lightLoss":0.1}' npm run calibrate 400
+if (process.env.SHADOW) Object.assign(TUNING.shadow, JSON.parse(process.env.SHADOW));
 const N = Number(process.argv[2] ?? 300);
 const SWEEP = process.argv.includes("sweep");
 const STREAK = process.argv.includes("streak");
 
+// * por partida con Sombra
 const games: Game[] = STREAK ? [] : Array.from({ length: N }, (_, i) => generateGame({ seed: `cal${i}`, level: "hard" }));
 
 const median = (xs: number[]) => {
@@ -40,6 +43,11 @@ function run(p: PairProfile) {
     trialPaid: rows.reduce((a, r) => a + r.trialPaid, 0) / rows.length,
     escaped: rows.filter((r) => r.escaped).length / rows.length,
     curses: rows.reduce((a, r) => a + r.curses, 0) / rows.length,
+    shadowed: rows.filter((r) => r.shadowed).length / rows.length,
+    touches: rows.reduce((a, r) => a + r.touches, 0) / Math.max(1, rows.filter((r) => r.shadowed).length),
+    waits: rows.reduce((a, r) => a + r.waits, 0) / Math.max(1, rows.filter((r) => r.shadowed).length),
+    winShadow: rows.filter((r) => r.shadowed && r.won).length / Math.max(1, rows.filter((r) => r.shadowed).length),
+    winClear: rows.filter((r) => !r.shadowed && r.won).length / Math.max(1, rows.filter((r) => !r.shadowed).length),
     pianoSecs: median(rows.flatMap((r) => r.trialSecs.piano)),
     tangramSecs: median(rows.flatMap((r) => r.trialSecs.tangram)),
   };
@@ -47,11 +55,11 @@ function run(p: PairProfile) {
 
 function report(label: string) {
   console.log(`\n${label}`);
-  console.log("pareja        gana  ♥ al ganar  sin daño  caídas  apagones  derrotas con apagón  movs (mediana)  sellos  fallos pagados  emergencia  maldiciones  piano s  tangram s");
+  console.log("pareja        gana  ♥ al ganar  sin daño  caídas  apagones  derrotas con apagón  movs (mediana)  sellos  fallos pagados  emergencia  maldiciones  piano s  tangram s  con Sombra  toques*  esperas*  gana c/S  gana s/S");
   for (const p of PROFILES) {
     const r = run(p);
     console.log(
-      `${p.name.padEnd(12)} ${pct(r.win)}  ${r.heartsOnWin.toFixed(2).padStart(10)}  ${pct(r.flawless)}  ${r.falls.toFixed(2).padStart(6)}  ${r.burnouts.toFixed(2).padStart(8)}  ${pct(r.lossByDark).padStart(19)}  ${String(r.moves).padStart(14)}  ${r.seals.toFixed(2).padStart(6)}  ${r.trialPaid.toFixed(2).padStart(14)}  ${pct(r.escaped).padStart(10)}  ${r.curses.toFixed(2).padStart(11)}  ${String(r.pianoSecs).padStart(7)}  ${String(r.tangramSecs).padStart(9)}`,
+      `${p.name.padEnd(12)} ${pct(r.win)}  ${r.heartsOnWin.toFixed(2).padStart(10)}  ${pct(r.flawless)}  ${r.falls.toFixed(2).padStart(6)}  ${r.burnouts.toFixed(2).padStart(8)}  ${pct(r.lossByDark).padStart(19)}  ${String(r.moves).padStart(14)}  ${r.seals.toFixed(2).padStart(6)}  ${r.trialPaid.toFixed(2).padStart(14)}  ${pct(r.escaped).padStart(10)}  ${r.curses.toFixed(2).padStart(11)}  ${String(r.pianoSecs).padStart(7)}  ${String(r.tangramSecs).padStart(9)}  ${pct(r.shadowed).padStart(10)}  ${r.touches.toFixed(2).padStart(7)}  ${r.waits.toFixed(1).padStart(8)}  ${pct(r.winShadow).padStart(8)}  ${pct(r.winClear).padStart(8)}`,
     );
   }
 }
