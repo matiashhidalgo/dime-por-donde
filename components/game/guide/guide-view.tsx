@@ -29,6 +29,7 @@ import { Button } from "../ui";
 import { describeCell } from "./describe";
 import { Legend } from "./legend";
 import { FirstHint } from "../hint";
+import { FullscreenButton, InstallHelp, useInstallHelp } from "../fullscreen";
 import { SoundToggle } from "../sound-toggle";
 import { CELL, MARK_COLOR, MapArt, PIN_COLOR } from "./map-art";
 
@@ -75,6 +76,7 @@ export function GuideView({
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [view, setView] = useState<View | null>(null);
   const [animate, setAnimate] = useState(false);
+  const [installHelp, closeInstallHelp] = useInstallHelp();
   const viewRef = useRef<View | null>(null);
   viewRef.current = view;
 
@@ -380,9 +382,9 @@ export function GuideView({
   ];
 
   return (
-    <main className="fixed inset-0 flex flex-col bg-background">
+    <main className="game-shell flex flex-col bg-background">
       {/* HUD */}
-      <header className="flex items-center gap-2 border-b border-border bg-card/90 px-2 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] backdrop-blur sm:px-4">
+      <header className="flex items-center gap-2 border-b border-border bg-card/90 pb-2 pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))] pt-[max(0.5rem,env(safe-area-inset-top))] backdrop-blur">
         <button onClick={onQuit} aria-label="Salir de la partida" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-border/50">
           <X size={22} />
         </button>
@@ -398,10 +400,12 @@ export function GuideView({
         >
           <BookOpen size={18} /> <span className="hidden sm:inline">Leyenda</span>
         </button>
+        <FullscreenButton />
         <SoundToggle />
       </header>
 
-      <div className="relative flex min-h-0 flex-1">
+      {/* The notch and the home bar stay outside the map (landscape too). */}
+      <div className="relative flex min-h-0 flex-1 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
         {/* Map */}
         <div
           ref={boxRef}
@@ -618,6 +622,8 @@ export function GuideView({
       )}
 
       {cursesOpen && <CurseSheet game={game} onClose={() => setCursesOpen(false)} />}
+
+      {installHelp && <InstallHelp onClose={closeInstallHelp} />}
 
       {ending && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center" onClick={() => setEnding(false)}>
