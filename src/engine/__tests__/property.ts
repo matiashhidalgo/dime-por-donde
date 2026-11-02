@@ -29,13 +29,17 @@ export function propertySuite(level: Level): void {
   const games: Game[] = [];
   const again: string[] = [];
   let msPerGame = 0;
-  beforeAll(() => {
-    const t0 = performance.now();
-    for (const code of codes) {
-      games.push(gamesForCode(code)[0]);
-      again.push(fingerprint(gamesForCode(code)[0]));
+  beforeAll(async () => {
+    let ms = 0;
+    for (let i = 0; i < codes.length; i++) {
+      const t0 = performance.now();
+      games.push(gamesForCode(codes[i])[0]);
+      again.push(fingerprint(gamesForCode(codes[i])[0]));
+      ms += performance.now() - t0;
+      // Yield now and then: one minute of solid CPU starves vitest's worker RPC.
+      if (i % 50 === 49) await new Promise((r) => setImmediate(r));
     }
-    msPerGame = (performance.now() - t0) / (codes.length * 2);
+    msPerGame = ms / (codes.length * 2);
   }, 600_000);
 
   it(`same code → same maze (${SEEDS} codes, generated twice)`, () => {

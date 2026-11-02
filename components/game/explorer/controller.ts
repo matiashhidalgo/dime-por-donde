@@ -10,17 +10,18 @@ import {
   type PlayState,
   SEEN,
   type StepResult,
+  type TrialResult,
+  TUNING,
   createPlay,
-  doorName,
-  keyName,
-  portalName,
-  refreshSight,
+  lightFraction,
+  shadowDistance,
   starCount,
   stepPlay,
   visibility,
   visionRadius,
+  waitPlay,
 } from "@/src/engine";
-import { type Sfx, audio } from "@/lib/audio";
+import { type Sfx, audio, buzz } from "@/lib/audio";
 import { type Particle, type Scene, TRAIL_LIFE, buildRows, draw, themePalette } from "./render";
 
 /**
@@ -33,30 +34,44 @@ export interface HudState {
   /** Stars collected so far. */
   stars: number;
   keys: number;
-  checkpointIndex: number;
+  hearts: number;
+  /** 0..1 candle left (drawn as a flame, never as a number). */
+  light: number;
+  /** Sight radius right now: 3, 2, 1 or 0 (dark). */
+  radius: number;
   pits: number;
-  lanternUntil: number;
   invert: Inversion | null;
-  /** Names of what's close by, for describing out loud. */
-  nearby: string[];
+  /** v2: seals won (bit = station index). */
+  seals: number;
+  /** v2: the station under the explorer that still guards its seal, or -1. */
+  station: number;
+  /** The whole rules state (trial overlays read their progress from it). */
+  state: PlayState;
   arrived: boolean;
+  lost: boolean;
+  /** This map has a Sombra (the «esperar» control shows up). */
+  hasShadow: boolean;
+  /** 0..1 how near it is by passages (0 = out of earshot): the HUD's pulse. */
+  heat: number;
 }
 
 export interface ControllerOptions {
   game: Game;
   canvas: HTMLCanvasElement;
   reducedMotion: boolean;
-  fonts: Scene["fonts"];
   onHud: (h: HudState) => void;
   onEvent: (e: PlayEvent, s: PlayState) => void;
-  onArrive: (s: PlayState) => void;
+  /** The expedition ended: reached the exit or ran out of hearts. */
+  onEnd: (s: PlayState) => void;
+  /** Streak maps: hearts carried in and the PLAY level (GAME_SPEC_V2.md anexo etapa 3). */
+  play?: { hearts?: number; level?: number };
 }
 
 type Seg =
   | { kind: "walk"; fx: number; fy: number; tx: number; ty: number; dur: number; slide: boolean }
   | { kind: "bump"; dir: Dir; dur: number }
   | { kind: "vanish"; dur: number; fall: boolean }
-  | { kind: "jump"; x: number; y: number }
+  | { kind: "jump"; x: number; y: number; snap: boolean }
   | { kind: "appear"; dur: number }
   | { kind: "apply" }
   | { kind: "sfx"; name: Sfx }
@@ -83,11 +98,15 @@ export class ExplorerController {
   private last = 0;
   private dpr = 1;
   private dist: Int8Array;
-  private lanternActive = false;
-  private arrivedAt = 0;
+  private endAt = 0;
   private openedDoors = new Set<number>();
   private burstDoors = new Set<number>();
   private disposed = false;
+  private pausedValue = false;
+  private beatTimer = 0;
+  private lastBeatAt = 0;
+  /** Ticks (heartbeat on, in ms) between beats: far → near. */
+  private static readonly BEAT_MS = [1300, 430] as const;
   readonly perf = { frames: 0, drawMs: 0, maxDrawMs: 0, slowFrames: 0 };
 
   constructor(opts: ControllerOptions) {
@@ -95,8 +114,7 @@ export class ExplorerController {
     this.game = opts.game;
     this.canvas = opts.canvas;
     this.ctx = opts.canvas.getContext("2d", { alpha: false })!;
-    const now = Date.now();
-    this.logic = createPlay(this.game, now);
+    this.logic = createPlay(this.game, opts.play);
     const n = this.game.grid.width * this.game.grid.height;
     const sx = (this.game.start % this.game.grid.width) + 0.5;
     const sy = Math.floor(this.game.start / this.game.grid.width) + 0.5;
@@ -106,7 +124,6 @@ export class ExplorerController {
       state: this.logic,
       vis: new Float32Array(n),
       target: new Float32Array(n),
-      inSight: new Uint8Array(n),
       cam: { x: sx, y: sy },
       tile: 48,
       width: 0,
@@ -118,18 +135,36 @@ export class ExplorerController {
       trail: [],
       invertFx: 0,
       invertBoth: false,
-      lanternFx: 0,
+      sightFx: visionRadius(this.logic),
+      lightFx: 1,
+      hurtFx: 0,
       rows: buildRows(this.game),
-      fonts: opts.fonts,
+      shadows: [],
+      seeDist: new Int8Array(n).fill(-1),
+      pulse: 0,
+      closeness: 0,
+      reduced: opts.reducedMotion,
     };
+    this.syncShadows(true);
     this.dist = new Int8Array(n);
     this.computeTargets();
     this.scene.vis.set(this.scene.target);
+    this.scene.closeness = this.closeness();
     this.emitHud();
+    this.ensureBeat();
   }
 
   get state(): PlayState {
     return this.logic;
+  }
+
+  /** A trial overlay is open: the maze ignores direction input, and the Sombra holds still (and quiet). */
+  get paused(): boolean {
+    return this.pausedValue;
+  }
+  set paused(v: boolean) {
+    this.pausedValue = v;
+    if (!v) this.ensureBeat();
   }
 
   resize(width: number, height: number): void {
@@ -138,7 +173,7 @@ export class ExplorerController {
     this.canvas.height = Math.round(height * this.dpr);
     this.scene.width = width;
     this.scene.height = height;
-    const vision = DIFFICULTIES[this.game.level].vision;
+    const vision = 3; // a full candle
     // Sight diameter (+ a margin) fits the short side; phones get bigger cells.
     this.scene.tile = Math.round(Math.max(44, Math.min(84, Math.min(width, height) / (2 * vision + 1.8))));
     this.wake();
@@ -146,10 +181,41 @@ export class ExplorerController {
 
   /** A direction was pressed (keyboard, swipe or pad). */
   press(dir: Dir, hold: boolean): void {
+    if (this.paused) return;
     if (hold && !this.held.includes(dir)) this.held.push(dir);
-    if (this.logic.arrived) return;
+    if (this.logic.arrived || this.logic.lost) return;
     if (this.queue.length > 0) this.buffer = dir;
     else this.step(dir);
+    this.wake();
+  }
+
+  /** «Esperar»: one tick in place (only where La Sombra roams). */
+  wait(): void {
+    if (this.paused || this.logic.arrived || this.logic.lost || !this.game.shadow || this.queue.length > 0) return;
+    const r = waitPlay(this.game, this.logic);
+    if (r.outcome !== "waited") return;
+    this.logic = r.state;
+    this.pending = r;
+    this.queue.push({ kind: "apply" });
+    this.startQueue();
+    this.wake();
+  }
+
+  /** Dev-only (QA from the console, see explorer-view): puts the explorer on `cell`, camera and fog included. */
+  teleportDev(cell: number): void {
+    const W = this.game.grid.width;
+    const x = (cell % W) + 0.5;
+    const y = Math.floor(cell / W) + 0.5;
+    this.logic = { ...this.logic, cell };
+    this.scene.state = this.logic;
+    Object.assign(this.scene.player, { x, y });
+    Object.assign(this.scene.cam, { x, y });
+    this.computeTargets();
+    this.scene.vis.set(this.scene.target);
+    this.syncShadows();
+    this.scene.closeness = this.closeness();
+    this.emitHud();
+    this.ensureBeat();
     this.wake();
   }
 
@@ -157,16 +223,84 @@ export class ExplorerController {
     this.held = dir === undefined ? [] : this.held.filter((d) => d !== dir);
   }
 
+  /**
+   * A trial action happened in an overlay (the view calls the engine and
+   * hands the result here, so the maze, HUD and effects stay in one place).
+   */
+  applyTrial(r: TrialResult): void {
+    if (r.state === this.logic) return;
+    this.logic = r.state;
+    this.pending = { state: r.state, events: r.events, dir: this.scene.player.facing, trail: [], outcome: "moved" };
+    this.apply();
+    this.wake();
+  }
+
   dispose(): void {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     clearTimeout(this.timer);
+    clearTimeout(this.beatTimer);
+    this.beatTimer = 0;
+    this.queue.length = 0;
+    this.held.length = 0;
+    this.buffer = null;
+  }
+
+  // ───────────────────────────────────────────── La Sombra: heartbeat and bodies
+
+  /** 0..1 nearness by passages, 0 when out of earshot or when nothing roams. */
+  private closeness(): number {
+    if (!this.game.shadow) return 0;
+    const d = shadowDistance(this.game, this.logic.shadow, this.logic.cell);
+    const range = TUNING.shadow.hearRange;
+    if (!Number.isFinite(d) || d > range) return 0;
+    return Math.max(0.08, Math.min(1, 1 - (d - 1) / range));
+  }
+
+  /** Starts the beat loop if it isn't running and there is something to hear. */
+  private ensureBeat(): void {
+    if (this.beatTimer || this.disposed || this.pausedValue || this.logic.arrived || this.logic.lost) return;
+    const c = this.closeness();
+    if (c <= 0) return;
+    const [slow, fast] = ExplorerController.BEAT_MS;
+    const gap = slow + (fast - slow) * c;
+    const wait = Math.max(120, gap - (performance.now() - this.lastBeatAt));
+    this.beatTimer = window.setTimeout(() => {
+      this.beatTimer = 0;
+      if (this.disposed || this.pausedValue || this.logic.arrived || this.logic.lost) return;
+      const now = this.closeness();
+      if (now > 0) {
+        this.lastBeatAt = performance.now();
+        audio.heartbeat(now);
+        if (now > 0.55) buzz([16, 70, 16]);
+        this.scene.pulse = 1;
+        this.scene.closeness = now;
+        this.wake();
+      }
+      this.ensureBeat();
+    }, wait);
+  }
+
+  /** Brings the drawn bodies in line with the rules state (snap = no easing, at the start). */
+  private syncShadows(snap = false): void {
+    const run = this.scene.state.shadow;
+    const W = this.game.grid.width;
+    if (!run) {
+      this.scene.shadows = [];
+      return;
+    }
+    run.bodies.forEach((b, i) => {
+      const x = (b.cell % W) + 0.5;
+      const y = Math.floor(b.cell / W) + 0.5;
+      const cur = this.scene.shadows[i];
+      this.scene.shadows[i] = { x: snap || !cur ? x : cur.x, y: snap || !cur ? y : cur.y, cell: b.cell, stunned: b.stun > 0 };
+    });
   }
 
   // ───────────────────────────────────────────── stepping
 
   private step(input: Dir): void {
-    const r = stepPlay(this.game, this.logic, input, Date.now());
+    const r = stepPlay(this.game, this.logic, input);
     const p = this.scene.player;
     p.facing = r.dir;
     if (r.outcome === "blocked" || r.outcome === "locked") {
@@ -200,19 +334,21 @@ export class ExplorerController {
         { kind: "sfx", name: "portal" },
         { kind: "vanish", dur: 200, fall: false },
         { kind: "apply" },
-        { kind: "jump", x: tx, y: ty },
+        { kind: "jump", x: tx, y: ty, snap: false },
         { kind: "sfx", name: "appear" },
         { kind: "appear", dur: 220 },
         { kind: "puff", big: false },
       );
     } else if (r.outcome === "fell") {
+      // A far fall: a long drop, then the camera cuts (no pan) so the trip
+      // itself gives nothing away — the guide has to find them again.
       const [tx, ty] = pos(r.state.cell);
       this.queue.push(
         { kind: "sfx", name: "fall" },
-        { kind: "vanish", dur: 320, fall: true },
+        { kind: "vanish", dur: 700, fall: true },
+        { kind: "jump", x: tx, y: ty, snap: true },
         { kind: "apply" },
-        { kind: "jump", x: tx, y: ty },
-        { kind: "appear", dur: 300 },
+        { kind: "appear", dur: 380 },
         { kind: "puff", big: true },
       );
     } else {
@@ -232,20 +368,40 @@ export class ExplorerController {
     if (!r) return;
     this.scene.state = r.state;
     this.computeTargets();
+    this.syncShadows();
+    this.scene.closeness = this.closeness();
+    this.ensureBeat();
     const p = this.scene.player;
     const reduce = this.opts.reducedMotion;
     for (const e of r.events) {
       this.opts.onEvent(e, r.state);
-      const sound = EVENT_SFX[e.type];
+      const sound = e.type === "uncurse" ? (e.cured ? "cure" : "unswirl") : e.type === "hurt" && e.cause === "shadow" ? undefined : EVENT_SFX[e.type];
       if (sound) audio.play(sound, this.game.theme);
       if (reduce) continue;
       if (e.type === "star") this.burst(p.x, p.y, 14, ["#f2b84b", "#ffe08a", "#fff6d1"], true);
       if (e.type === "key") this.burst(p.x, p.y, 10, ["#ffffff", "#fff2c2"], false);
-      if (e.type === "lantern") this.burst(p.x, p.y, 10, ["#ffd166", "#fff1c1"], false);
-      if (e.type === "checkpoint") this.burst(p.x, p.y, 12, ["#3d9a5f", "#7fd49b", "#ffffff"], false);
+      if (e.type === "lantern") this.burst(p.x, p.y, 14, ["#ffd166", "#fff1c1"], false);
+      if (e.type === "candle") this.burst(p.x, p.y, 10, ["#ffb43d", "#fff4c2"], false, 0.8);
       if (e.type === "swirl") this.burst(p.x, p.y, 12, ["#8a5cf0", "#c5a8ff", "#5b2fa0"], false, 0.8);
-      if (e.type === "fell") this.scene.shake = 1;
+      if (e.type === "burnout") this.burst(p.x, p.y, 12, ["#55505e", "#8a8494", "#3a3640"], false, 0.6);
+      if (e.type === "seal") this.burst(p.x, p.y - 0.4, 30, ["#f2b84b", "#ffe08a", "#fff6d1", "#ffffff"], true, 1.2);
+      if (e.type === "heal") this.burst(p.x, p.y, 12, ["#ef5466", "#ffd0d6"], false, 0.8);
+      if (e.type === "curse") this.burst(p.x, p.y, 16, ["#5b2fa0", "#8a5cf0", "#2a1840"], false, 0.9);
+      if (e.type === "shadowTouch") this.burst(p.x, p.y, 16, ["#0b0814", "#3b2d6b", "#8a74e0"], false, 0.9);
+      if (e.type === "shadowStunned") this.burst(p.x, p.y, 14, ["#ffffff", "#fff1c1", "#c5b6ff"], true, 0.9);
+      if (e.type === "uncurse" && e.cured) this.burst(p.x, p.y, 18, ["#c5a8ff", "#ffffff", "#8fd6a8"], true, 1);
+      if (e.type === "emergencyExit") this.burst(p.x, p.y, 24, ["#f2b84b", "#ffffff", "#e07a5f"], false, 1.2);
       if (e.type === "arrived") this.burst(p.x, p.y, 46, ["#e07a5f", "#f2b84b", "#3d9a5f", "#3d6fd8", "#d6589f", "#ffffff"], false, 1.6);
+    }
+    // These happen with or without motion: they're the stakes, not decoration.
+    for (const e of r.events) {
+      if (e.type === "curse") buzz([30, 40, 30, 40, 30]);
+      if (e.type === "shadowTouch") buzz([60, 40, 160]);
+      if (e.type === "hurt") {
+        this.scene.hurtFx = reduce ? 0.6 : 1;
+        if (!reduce) this.scene.shake = 1;
+        buzz(e.hearts === 0 ? [120, 80, 120, 80, 260] : [90, 60, 140]);
+      }
     }
     if (!reduce) {
       for (const c of r.trail) {
@@ -257,64 +413,43 @@ export class ExplorerController {
         }
       }
     }
-    if (r.state.arrived) this.arrivedAt = performance.now();
+    if (r.state.arrived || r.state.lost) this.endAt = performance.now();
     this.emitHud();
   }
 
   private computeTargets(): void {
     const s = this.scene.state;
-    const now = Date.now();
-    const R = visionRadius(this.game, s, now);
-    this.lanternActive = now < s.lanternUntil;
+    const R = visionRadius(s);
     this.dist = visibility(this.game, s.cell, R, s.keys);
+    this.scene.seeDist = this.dist;
     const memory = DIFFICULTIES[this.game.level].memory;
     const memAlpha = memory === "full" ? 0.34 : memory === "dim" ? 0.15 : 0;
-    const { target, inSight } = this.scene;
+    const { target } = this.scene;
     for (let c = 0; c < target.length; c++) {
       const d = this.dist[c];
-      if (d >= 0) {
-        target[c] = 1 - 0.42 * Math.pow(d / (R + 0.5), 2);
-        inSight[c] = 1;
-      } else {
-        target[c] = s.memo[c] & SEEN ? memAlpha : 0;
-        inSight[c] = 0;
-      }
+      if (d >= 0) target[c] = R === 0 ? 0.55 : 1 - 0.42 * Math.pow(d / (R + 0.5), 2);
+      else target[c] = s.memo[c] & SEEN ? memAlpha : 0;
     }
     this.scene.invertBoth = s.invert?.axes === "xy";
   }
 
   private emitHud(): void {
     const s = this.scene.state;
-    const nearby: string[] = [];
-    const items: { d: number; name: string }[] = [];
-    for (const row of this.scene.rows) {
-      for (const it of row) {
-        const d = this.dist[it.cell];
-        if (d < 0 || d > 2) continue;
-        let name: string | null = null;
-        if (it.kind === "landmark") name = it.landmark.label;
-        else {
-          const o = this.game.occupant[it.cell]!;
-          if (o.type === "key" && !(s.keys & (1 << o.color))) name = keyName(o.color);
-          else if (o.type === "door") name = doorName(o.color);
-          else if (o.type === "portal") name = portalName(this.game.portals[o.pair].symbol);
-          else if (o.type === "exit") name = "la salida";
-          else if (o.type === "checkpoint") name = "una bandera";
-        }
-        if (name) items.push({ d, name });
-      }
-    }
-    items.sort((a, b) => a.d - b.d);
-    for (const it of items) if (!nearby.includes(it.name) && nearby.length < 3) nearby.push(it.name);
     this.opts.onHud({
       stars: starCount(s),
       keys: s.keys,
-      checkpointIndex: s.checkpointIndex,
+      hearts: s.hearts,
+      light: lightFraction(s),
+      radius: visionRadius(s),
       pits: s.pits,
-      lanternUntil: s.lanternUntil,
       invert: s.invert,
-      nearby,
+      seals: s.seals,
+      station: this.game.stations?.find((st) => st.cell === s.cell && !(s.seals & (1 << st.index)))?.index ?? -1,
+      state: s,
       arrived: s.arrived,
+      lost: s.lost,
+      hasShadow: !!this.game.shadow,
+      heat: this.closeness(),
     });
   }
 
@@ -393,12 +528,12 @@ export class ExplorerController {
       if (dt > 20) p.slowFrames++;
     }
 
-    if (this.arrivedAt && t - this.arrivedAt > (this.opts.reducedMotion ? 600 : 1400)) {
-      this.arrivedAt = 0;
-      this.opts.onArrive(this.logic);
+    if (this.endAt && t - this.endAt > (this.opts.reducedMotion ? 700 : this.logic.lost ? 1900 : 1400)) {
+      this.endAt = 0;
+      this.opts.onEnd(this.logic);
     }
 
-    if (busy || this.arrivedAt) {
+    if (busy || this.endAt) {
       this.raf = requestAnimationFrame((n) => this.frame(n));
     } else if (!this.opts.reducedMotion) {
       this.last = 0;
@@ -429,6 +564,11 @@ export class ExplorerController {
       else if (seg.kind === "jump") {
         p.x = seg.x;
         p.y = seg.y;
+        if (seg.snap) {
+          sc.cam.x = seg.x;
+          sc.cam.y = seg.y;
+          sc.vis.fill(0); // land in the unknown: the old surroundings don't fade across
+        }
       } else {
         const dur = reduce ? Math.min(seg.dur, 60) : seg.dur;
         const k = Math.max(0, Math.min(1, (t - this.segStart) / dur));
@@ -477,7 +617,7 @@ export class ExplorerController {
         p.squash = landedFrom === "walk" && !reduce ? -0.25 : 0; // land
         const next = this.buffer ?? (this.held.length ? this.held[this.held.length - 1] : null);
         this.buffer = null;
-        if (next !== null && !this.logic.arrived) this.step(next);
+        if (next !== null && !this.logic.arrived && !this.logic.lost) this.step(next);
         this.segStart = t;
       }
     }
@@ -517,21 +657,43 @@ export class ExplorerController {
     }
     busy ||= fogMoving;
 
-    // Lantern and inversion effects.
-    const now = Date.now();
-    if (this.lanternActive && now >= sc.state.lanternUntil) {
-      this.logic = refreshSight(this.game, this.logic, now);
-      if (!this.pending) this.scene.state = this.logic;
-      this.computeTargets();
-      this.emitHud();
+    // Candle light, sight and inversion effects.
+    // Not `busy ||= ease(…)`: that would skip the easing whenever busy is already true.
+    const sightEasing = ease(sc, "sightFx", visionRadius(sc.state), dt, reduce, 0.02);
+    const lightEasing = ease(sc, "lightFx", lightFraction(sc.state), dt, reduce);
+    const invertEasing = ease(sc, "invertFx", sc.state.invert ? 1 : 0, dt, reduce);
+    busy = busy || sightEasing || lightEasing || invertEasing;
+    if (sc.lightFx < 0.25 && sc.lightFx > 0.005 && !reduce) busy = true; // the flame flickers
+    if (sc.hurtFx > 0) {
+      sc.hurtFx = Math.max(0, sc.hurtFx - dt / (reduce ? 500 : 900));
       busy = true;
     }
-    // Not `busy ||= ease(…)`: that would skip the easing whenever busy is already true.
-    const lanternEasing = ease(sc, "lanternFx", this.lanternActive ? 1 : 0, dt, reduce);
-    const invertEasing = ease(sc, "invertFx", sc.state.invert ? 1 : 0, dt, reduce);
-    busy = busy || lanternEasing || invertEasing;
     if (sc.shake > 0) {
       sc.shake = reduce ? 0 : Math.max(0, sc.shake - dt / 380);
+      busy = true;
+    }
+
+    // La Sombra's bodies glide to their cells; the heartbeat pulse eases out.
+    for (const b of sc.shadows) {
+      const W = this.game.grid.width;
+      const tx = (b.cell % W) + 0.5;
+      const ty = Math.floor(b.cell / W) + 0.5;
+      const ddx = tx - b.x;
+      const ddy = ty - b.y;
+      if (Math.abs(ddx) + Math.abs(ddy) > 0.004) {
+        const k = reduce || Math.hypot(ddx, ddy) > 3 ? 1 : 1 - Math.exp(-dt / 70);
+        b.x += ddx * k;
+        b.y += ddy * k;
+        busy = true;
+      } else {
+        b.x = tx;
+        b.y = ty;
+      }
+      if (b.stunned && !reduce) busy = true;
+    }
+    if (sc.shadows.length && sc.closeness > 0 && !reduce) busy = true; // eyes sway
+    if (sc.pulse > 0) {
+      sc.pulse = Math.max(0, sc.pulse - dt / (reduce ? 650 : 380));
       busy = true;
     }
 
@@ -566,9 +728,9 @@ export class ExplorerController {
   }
 }
 
-function ease(sc: Scene, key: "lanternFx" | "invertFx", to: number, dt: number, reduce: boolean): boolean {
+function ease(sc: Scene, key: "sightFx" | "lightFx" | "invertFx", to: number, dt: number, reduce: boolean, eps = 0.01): boolean {
   const d = to - sc[key];
-  if (Math.abs(d) < 0.01) {
+  if (Math.abs(d) < eps) {
     sc[key] = to;
     return false;
   }
@@ -583,8 +745,21 @@ const EVENT_SFX: Partial<Record<PlayEvent["type"], Sfx>> = {
   key: "key",
   star: "star",
   lantern: "lantern",
-  checkpoint: "checkpoint",
+  candle: "candle",
   swirl: "swirl",
   unswirl: "unswirl",
+  hurt: "hurt",
+  shadowTouch: "shadowHit",
+  shadowStunned: "shadowStun",
+  waited: "tap",
+  dimmed: "dim",
+  darkness: "darkness",
+  burnout: "burnout",
+  defeat: "defeat",
   arrived: "win",
+  seal: "seal",
+  exitOpen: "exitOpen",
+  trialFail: "bzzt",
+  curse: "curse",
+  emergencyExit: "emergency",
 };

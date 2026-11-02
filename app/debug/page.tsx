@@ -9,6 +9,7 @@ import {
   KEY_COLORS,
   PORTAL_SYMBOLS,
   THEMES,
+  TUNING,
   auditGame,
   cellLabel,
   createCode,
@@ -171,7 +172,7 @@ function Sidebar({ game, ms }: { game: Game; ms: number }) {
         <Row k="Tema" v={THEMES[game.theme].name} />
         <Row k="Algoritmo" v={game.algorithm} />
         <Row k="Obstáculos" v={game.obstacleTypes.join(", ")} />
-        <Row k="Visión / memoria" v={`${cfg.vision} pasos · ${cfg.memory}`} />
+        <Row k="Visión / memoria" v={`vela ${TUNING.candle.max} movs · ${cfg.memory}`} />
         <Row k="Huella" v={<code className="text-xs">{fingerprint(game)}</code>} />
         <Row k="Generación" v={`${ms.toFixed(1)} ms · intento ${s.attempt + 1}`} />
         {retries.length > 0 && <Row k="Reintentos" v={retries.map(([r, n]) => `${r}×${n}`).join(", ")} />}

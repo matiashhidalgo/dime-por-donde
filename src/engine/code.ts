@@ -18,8 +18,9 @@ export const SEED_LENGTH = 6;
 export const CODE_LENGTH = SEED_LENGTH + 2;
 
 /** Bump only when the generator's output changes. Old versions must keep working. */
-export const GENERATOR_VERSION = 1;
-export const SUPPORTED_VERSIONS: readonly number[] = [1];
+export const GENERATOR_VERSION = 2;
+/** v1: the original maze (stage 1 rules, no seals). v2: same maze + 3 sealed stations. */
+export const SUPPORTED_VERSIONS: readonly number[] = [1, 2];
 
 export const LEVELS = ["easy", "medium", "hard"] as const;
 export type Level = (typeof LEVELS)[number];

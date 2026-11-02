@@ -1,11 +1,16 @@
 "use client";
 
-import { Compass, History, KeyRound, Map as MapIcon, RotateCcw, Sparkles } from "lucide-react";
+import { useEffect, useState } from "react";
+import { BookOpen, Compass, Flame, History, KeyRound, Map as MapIcon, RotateCcw, Sparkles } from "lucide-react";
+import { hintSeen } from "@/lib/hints";
+import { Tour } from "../tour";
+import { bestStreak } from "@/lib/history";
 import { DecorMaze } from "../decor-maze";
 import { SoundToggle } from "../sound-toggle";
 import { Button, Card, Screen } from "../ui";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { SITE } from "@/lib/site";
+import { TUNING } from "@/src/engine";
 
 export interface ResumeOffer {
   label: string;
@@ -24,6 +29,13 @@ export function HomeScreen({
   onHistory: () => void;
   resume?: ResumeOffer | null;
 }) {
+  const [best, setBest] = useState(0);
+  const [tour, setTour] = useState(false);
+  useEffect(() => {
+    setBest(bestStreak());
+    // First visit on this device: the four cards, once (they can skip; it won't come back by itself).
+    if (!hintSeen("tour") && !resume) setTour(true);
+  }, [resume]);
   return (
     <Screen>
       <header className="flex min-h-12 items-center justify-between">
@@ -48,7 +60,7 @@ export function HomeScreen({
         <Card className="mt-8 border-accent/40">
           <p className="font-medium">Tenías una partida en curso</p>
           <p className="mt-0.5 text-sm text-muted">{resume.label}</p>
-          <p className="mt-2 text-sm text-muted">El reloj sigue desde donde iba. Si eras explorador, vuelves a la entrada.</p>
+          <p className="mt-2 text-sm text-muted">Si eras explorador, vuelves a la entrada del mapa con los corazones con que lo empezaron.</p>
           <div className="mt-4 grid grid-cols-2 gap-2">
             <Button variant="secondary" onClick={resume.onDiscard}>
               Descartar
@@ -67,13 +79,23 @@ export function HomeScreen({
         <Button size="lg" variant="secondary" onClick={onJoin}>
           <KeyRound size={20} /> Tengo un código
         </Button>
-        <Button variant="ghost" onClick={onHistory} className="text-muted">
-          <History size={18} /> Historial
-        </Button>
+        <div className="grid grid-cols-2 gap-3">
+          <Button variant="ghost" onClick={() => setTour(true)} className="text-muted">
+            <BookOpen size={18} /> Cómo se juega
+          </Button>
+          <Button variant="ghost" onClick={onHistory} className="text-muted">
+            <History size={18} /> Historial
+          </Button>
+        </div>
       </div>
+      {best > 0 && (
+        <p className="mt-2 flex items-center justify-center gap-1.5 text-sm text-muted">
+          <Flame size={16} /> Su mejor racha: {best === 1 ? "1 mapa" : `${best} mapas`}
+        </p>
+      )}
 
       <Card className="mt-8">
-        <h2 className="font-display text-xl">Cómo se juega</h2>
+        <h2 className="font-display text-xl">En tres pasos</h2>
         <ol className="mt-3 space-y-3 text-sm">
           <li className="flex gap-3">
             <Step n={1} />
@@ -88,10 +110,14 @@ export function HomeScreen({
           </li>
           <li className="flex gap-3">
             <Step n={3} />
-            <span>Hablen hasta llegar a la salida. Bonus: recojan las estrellas.</span>
+            <span>
+              Hablen hasta escapar. Tienen {TUNING.hearts} corazones compartidos: los pozos y quedarse a oscuras cuestan uno. La vela del explorador se gasta al
+              caminar; los faroles y las velas del camino la recargan. Bonus: recojan las estrellas.
+            </span>
           </li>
         </ol>
       </Card>
+      {tour && <Tour onClose={() => setTour(false)} />}
     </Screen>
   );
 }

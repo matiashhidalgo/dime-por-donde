@@ -2,8 +2,9 @@ import type { Level } from "./code";
 import type { MazeAlgorithm } from "./maze";
 
 /**
- * Every tunable number lives here. Values marked (calibrar) are first guesses
- * to adjust after real play sessions — see GAME_SPEC.md anexo.
+ * Generator numbers: changing any of them changes the mazes a code makes, so
+ * it ships as a new generator version (GAME_SPEC_V2.md §8). Play-feel numbers
+ * (hearts, candle, falls, swirl strength) live in tuning.ts.
  */
 
 export const OBSTACLE_TYPES = ["pits", "doors", "portals", "ice", "swirls"] as const;
@@ -16,8 +17,6 @@ export interface DifficultyConfig {
   name: string;
   width: number;
   height: number;
-  /** Explorer sight in real steps through open corridors. */
-  vision: number;
   /** How visited cells look once out of sight. */
   memory: "full" | "dim" | "none";
   /** Algorithm weights: [backtracker, prim, mixed]. */
@@ -38,8 +37,6 @@ export interface DifficultyConfig {
   swirlBothAxesChance: number;
   stars: number;
   lanterns: Range;
-  lanternBonus: number;
-  lanternSeconds: number;
   checkpoints: number;
   /** Landmark zone size (cells); zones = round(width/size) × round(height/size). */
   landmarkZone: number;
@@ -51,7 +48,6 @@ export interface DifficultyConfig {
   effort: Range;
 }
 
-export const PIT_PENALTY_SECONDS = 10;
 /** Weight of one route decision vs one move in the effort score. */
 export const DECISION_WEIGHT = 2;
 
@@ -61,7 +57,6 @@ export const DIFFICULTIES: Record<Level, DifficultyConfig> = {
     name: "Fácil",
     width: 12,
     height: 12,
-    vision: 4,
     memory: "full",
     algorithmWeights: { backtracker: 3, prim: 2, mixed: 3 },
     braid: [0.15, 0.3],
@@ -76,8 +71,6 @@ export const DIFFICULTIES: Record<Level, DifficultyConfig> = {
     swirlBothAxesChance: 0,
     stars: 3,
     lanterns: [1, 1],
-    lanternBonus: 2,
-    lanternSeconds: 20,
     checkpoints: 2,
     landmarkZone: 4,
     effort: [40, 130],
@@ -87,7 +80,6 @@ export const DIFFICULTIES: Record<Level, DifficultyConfig> = {
     name: "Medio",
     width: 18,
     height: 18,
-    vision: 3,
     memory: "dim",
     algorithmWeights: { backtracker: 3, prim: 3, mixed: 3 },
     braid: [0.2, 0.35],
@@ -102,8 +94,6 @@ export const DIFFICULTIES: Record<Level, DifficultyConfig> = {
     swirlBothAxesChance: 0.3,
     stars: 3,
     lanterns: [2, 2],
-    lanternBonus: 2,
-    lanternSeconds: 18,
     checkpoints: 3,
     landmarkZone: 5,
     effort: [60, 210],
@@ -113,7 +103,6 @@ export const DIFFICULTIES: Record<Level, DifficultyConfig> = {
     name: "Difícil",
     width: 26,
     height: 26,
-    vision: 3,
     memory: "none",
     algorithmWeights: { backtracker: 3, prim: 3, mixed: 3 },
     braid: [0.25, 0.4],
@@ -128,8 +117,6 @@ export const DIFFICULTIES: Record<Level, DifficultyConfig> = {
     swirlBothAxesChance: 0.5,
     stars: 3,
     lanterns: [3, 3],
-    lanternBonus: 2,
-    lanternSeconds: 15,
     checkpoints: 4,
     landmarkZone: 6,
     effort: [90, 340],

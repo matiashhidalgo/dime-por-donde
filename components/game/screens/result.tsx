@@ -1,66 +1,70 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Check, Compass, Home, Map as MapIcon, Minus, Plus, Repeat, X as XIcon } from "lucide-react";
+import { Check, Heart, Home, Minus, Plus, Repeat, X as XIcon } from "lucide-react";
 import { motion } from "motion/react";
-import { DIFFICULTIES, PIT_PENALTY_SECONDS, PIT_TOLERANCE, SLOW_FACTOR, parSeconds, rateBreakdown } from "@/src/engine";
+import { DIFFICULTIES, TUNING, rateBreakdown } from "@/src/engine";
 import { formatTime, usePrefersReducedMotion } from "@/lib/hooks";
 import { type HistoryEntry, ROLE_NAME, newEntryId, saveEntry } from "@/lib/history";
-import { duoPhrase, resultPhrase } from "@/lib/phrases";
+import { emergencyPhrase, resultPhrase } from "@/lib/phrases";
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
-import { type RoundRecord, type Session, otherRole } from "../session";
+import type { Session } from "../session";
 import { Button, Card, Screen, Stars } from "../ui";
 
 /**
- * End of a round, the same layout for both roles. The explorer's game
- * measured pits and stars itself; the guide never sees them happen, so the
- * same numbers get small +/− buttons and a "pregúntale" hint.
- * After the last duo round, a summary of the three rounds follows.
+ * Graded endings (anexo etapa 3): «won» = the 3 seals and the exit (or just
+ * the exit on a v1 code), «escaped» = the emergency exit with 1–2 seals,
+ * «lost» = trapped, no hearts left.
+ */
+export type Ending = "won" | "escaped" | "lost";
+
+export interface ExpeditionEnd {
+  ending: Ending;
+  /** Informative only: time doesn't count toward the rating (v2). */
+  timeMs: number;
+  /** Real counts from the explorer's game; absent for the guide, who enters them. */
+  measured?: { hearts: number; pits: number; stars: number; seals: number; hurts: number };
+}
+
+/**
+ * End of an expedition, the same layout for both roles: victory (rating from
+ * hearts kept + all stars) or defeat (no hearts left, told with humor). The
+ * guide never sees hearts, falls or stars happen, so they get +/− steppers
+ * and a "pregúntale" hint; the explorer's numbers are measured.
  */
 export function ResultScreen({
   session,
-  timeMs,
-  measured,
-  previous,
-  onNextRound,
+  end,
   onSwapAndNew,
   onHome,
 }: {
   session: Session;
-  timeMs: number;
-  /** Real counts from the explorer's game; absent for the guide. */
-  measured?: { pits: number; stars: number };
-  /** Earlier duo rounds, as this device recorded them. */
-  previous: RoundRecord[];
-  onNextRound: (record: RoundRecord) => void;
+  end: ExpeditionEnd;
   onSwapAndNew: () => void;
   onHome: () => void;
 }) {
-  const game = session.games[session.round];
+  const { game } = session;
+  const { measured } = end;
+  const escaped = end.ending !== "lost";
+  const emergency = end.ending === "escaped";
   const maxStars = DIFFICULTIES[game.level].stars;
+  const maxHearts = TUNING.hearts;
   const reduce = usePrefersReducedMotion();
+  const [hearts, setHearts] = useState(measured?.hearts ?? (escaped ? maxHearts : 0));
   const [pits, setPits] = useState(measured?.pits ?? 0);
   const [stars, setStars] = useState(measured?.stars ?? 0);
+  const maxSeals = game.stations?.length ?? 0;
+  const [seals, setSeals] = useState(measured?.seals ?? (end.ending === "won" ? maxSeals : emergency ? 1 : 0));
   const [id] = useState(newEntryId);
   const [date] = useState(() => new Date().toISOString());
 
-  const recordedTime = session.timed ? timeMs + pits * PIT_PENALTY_SECONDS * 1000 : null;
-  const par = parSeconds(game);
-  const why = rateBreakdown(game, { timeMs: recordedTime, pits, stars });
-  const rating = why.rating;
+  const why = rateBreakdown(game, { escaped, hearts, stars });
+  // An emergency exit is its own ending: no rating stars, just the seals they got.
+  const rating = emergency ? 0 : why.rating;
   const phrase = useMemo(
-    () =>
-      resultPhrase({
-        seed: `${session.code}-${session.round}`,
-        pits,
-        stars,
-        maxStars,
-        rating,
-        timed: session.timed,
-        pace: recordedTime === null ? null : recordedTime / 1000 / par,
-      }),
-    [session.code, session.round, pits, stars, maxStars, rating, session.timed, recordedTime, par],
+    () => (emergency ? emergencyPhrase(session.code, seals) : resultPhrase({ seed: session.code, escaped, hearts, maxHearts, pits, stars, maxStars })),
+    [session.code, emergency, seals, escaped, hearts, maxHearts, pits, stars, maxStars],
   );
 
   // Save immediately (so nothing is lost) and again whenever the numbers change.
@@ -70,89 +74,171 @@ export function ResultScreen({
       code: session.code,
       mode: session.mode,
       level: game.level,
-      round: session.round + 1,
+      round: 1,
       role: session.role,
       date,
-      result: "won",
-      timeMs: recordedTime,
+      // v1 deploys read this list too: an emergency exit is stored as "won" + ending.
+      result: escaped ? "won" : "lost",
+      ending: end.ending,
+      seals,
+      timeMs: end.timeMs,
       pits,
+      hearts,
       stars,
       rating,
     };
     saveEntry(entry);
-  }, [id, date, session, game.level, recordedTime, pits, stars, rating]);
+  }, [id, date, session, game.level, escaped, end.ending, seals, end.timeMs, pits, hearts, stars, rating]);
 
   useEffect(() => {
-    track("round_won", { level: game.level, role: session.role, timed: session.timed });
-  }, [game.level, session.role, session.timed]);
+    track(end.ending === "won" ? "expedition_won" : end.ending === "escaped" ? "expedition_escaped" : "expedition_lost", { role: session.role });
+  }, [end.ending, session.role]);
 
-  const record: RoundRecord = { round: session.round, role: session.role, level: game.level, timeMs: recordedTime, pits, stars, rating };
-  const isDuo = session.mode === "duo";
-  const moreRounds = isDuo && session.round < session.games.length - 1;
-  const duoDone = isDuo && !moreRounds;
-  const allRounds = duoDone ? [...previous.filter((r) => r.round < session.round), record] : [];
+  const guide = !measured;
 
   return (
     <Screen>
       <div className="relative pt-6 text-center">
-        {!reduce && <Confetti />}
-        <p className="text-sm font-medium uppercase tracking-[0.2em] text-muted">
-          {isDuo ? `Ronda ${session.round + 1} de ${session.games.length} · ¡Llegaron!` : "¡Llegaron!"}
-        </p>
-        <p className="mt-1 text-xs text-muted">
-          {DIFFICULTIES[game.level].name} · jugaste como {ROLE_NAME[session.role].toLowerCase()}
-        </p>
+        {end.ending === "won" && !reduce && <Confetti />}
+        <p className="text-sm font-medium uppercase tracking-[0.2em] text-muted">{ENDING_TITLE[end.ending]}</p>
+        <p className="mt-1 text-xs text-muted">Jugaste como {ROLE_NAME[session.role].toLowerCase()}</p>
 
-        <div className="mt-4" aria-live="polite">
-          <RatingStars value={rating} reduce={reduce} />
-          <p className="sr-only">Calificación: {rating} de 3</p>
-        </div>
-
-        <ul className="mt-3 flex flex-wrap justify-center gap-1.5 text-xs" aria-label="Por qué esta calificación">
-          {why.onTime !== null && <Reason ok={why.onTime} text={why.onTime ? "A buen ritmo" : "Un poco lentos"} />}
-          <Reason ok={why.fewPits} text={why.fewPits ? `Menos de ${PIT_TOLERANCE[game.level]} caídas` : "Muchas caídas"} />
-          <Reason ok={why.allStars} bonus text={why.allStars ? "Todas las estrellas (+1)" : "Faltaron estrellas"} />
-        </ul>
-
-        {session.timed ? (
+        {emergency ? (
+          <div className="mt-5 flex flex-col items-center" aria-hidden>
+            <EmergencyHatch reduce={reduce} />
+          </div>
+        ) : escaped ? (
           <>
-            <p className="mt-5 font-display text-6xl tabular-nums">{formatTime(recordedTime ?? 0)}</p>
-            <p className="mt-1 text-sm text-muted">
-              {pits > 0 && `incluye +${pits * PIT_PENALTY_SECONDS} s de pozos · `}
-              referencia {formatTime(par * 1000)}, ritmo hasta {formatTime(par * SLOW_FACTOR * 1000)}
-            </p>
+            <div className="mt-4" aria-live="polite">
+              <RatingStars value={rating} reduce={reduce} />
+              <p className="sr-only">Calificación: {rating} de 3</p>
+            </div>
+            <ul className="mt-3 flex flex-wrap justify-center gap-1.5 text-xs" aria-label="Por qué esta calificación">
+              <Reason ok={hearts === maxHearts} bonus text={hearts === 1 ? "Salieron con 1 corazón" : `Salieron con ${hearts} corazones`} />
+              <Reason ok={why.allStars} bonus text={why.allStars ? "Todas las estrellas (+1)" : "Faltaron estrellas"} />
+            </ul>
           </>
         ) : (
-          <p className="mt-5 font-display text-4xl">Sin reloj, sin prisa</p>
+          <div className="mt-5 flex flex-col items-center" aria-hidden>
+            <SpentCandle reduce={reduce} />
+          </div>
         )}
+
         <p className="mx-auto mt-4 flex min-h-[3.5rem] max-w-sm items-center justify-center text-balance font-display text-xl italic">{phrase}</p>
       </div>
 
       <Card className="mt-5 p-0 sm:p-0">
-        <div className="grid grid-cols-2 divide-x divide-border text-center">
-          <Stat label="Estrellas del mapa" value={stars} max={maxStars} onChange={measured ? undefined : setStars} star />
-          <Stat label="Caídas en pozos" value={pits} max={99} onChange={measured ? undefined : setPits} />
+        <div className={cn("grid divide-x divide-border text-center", maxSeals ? "grid-cols-4" : "grid-cols-3")}>
+          <Stat
+            label="Corazones"
+            value={hearts}
+            max={maxHearts}
+            min={escaped ? 1 : 0}
+            onChange={guide && escaped ? setHearts : undefined}
+            render={(v) => <HeartRow value={v} max={maxHearts} />}
+          />
+          {maxSeals > 0 && (
+            <Stat
+              label="Sellos"
+              value={seals}
+              min={emergency ? 1 : 0}
+              max={emergency ? maxSeals - 1 : maxSeals}
+              onChange={guide && end.ending !== "won" ? setSeals : undefined}
+              suffix={`/ ${maxSeals}`}
+            />
+          )}
+          <Stat label="Estrellas" value={stars} max={maxStars} onChange={guide ? setStars : undefined} suffix={`/ ${maxStars}`} />
+          <Stat label="Caídas" value={pits} max={99} onChange={guide ? setPits : undefined} />
         </div>
-        {!measured && <p className="border-t border-border px-4 py-2.5 text-center text-sm text-muted">Pregúntale a tu pareja y anótalo aquí.</p>}
+        {guide && <p className="border-t border-border px-4 py-2.5 text-center text-sm text-muted">Pregúntale a tu pareja y anótalo aquí.</p>}
       </Card>
 
-      {duoDone && <DuoSummary rounds={allRounds} seed={session.code} timed={session.timed} />}
+      <p className="mt-3 text-center text-sm text-muted">
+        Tiempo: <span className="tabular-nums">{formatTime(end.timeMs)}</span> · solo como dato, no cuenta para la calificación
+      </p>
 
       <div className="mt-6 grid gap-3">
-        {moreRounds ? (
-          <Button size="lg" onClick={() => onNextRound(record)}>
-            Ronda {session.round + 2}: ahora eres {ROLE_NAME[otherRole(session.role)].toLowerCase()} <ArrowRight size={20} />
-          </Button>
-        ) : (
-          <Button size="lg" onClick={onSwapAndNew}>
-            <Repeat size={20} /> Intercambiar roles y jugar otra
-          </Button>
-        )}
+        <Button size="lg" onClick={onSwapAndNew}>
+          <Repeat size={20} /> {end.ending === "won" ? "Intercambiar roles y jugar otra" : "Revancha con roles cambiados"}
+        </Button>
         <Button variant="secondary" onClick={onHome}>
           <Home size={18} /> Volver al inicio
         </Button>
       </div>
     </Screen>
+  );
+}
+
+export const ENDING_TITLE: Record<Ending, string> = {
+  won: "¡Escaparon!",
+  escaped: "Salida de emergencia",
+  lost: "Atrapados",
+};
+
+/** A hatch in the floor, lid open, with a little trail of dust: the way out nobody brags about. */
+export function EmergencyHatch({ reduce }: { reduce: boolean }) {
+  return (
+    <svg width="96" height="96" viewBox="0 0 96 96" className="text-muted">
+      <rect x="18" y="58" width="60" height="26" rx="4" fill="currentColor" opacity="0.35" />
+      <rect x="26" y="64" width="44" height="14" rx="2" fill="currentColor" opacity="0.7" />
+      <motion.g
+        style={{ transformOrigin: "26px 58px" }}
+        initial={reduce ? false : { rotate: 0 }}
+        animate={{ rotate: -62 }}
+        transition={{ type: "spring", bounce: 0.4, duration: 0.9 }}
+      >
+        <rect x="26" y="52" width="44" height="6" rx="2" fill="currentColor" opacity="0.6" />
+      </motion.g>
+      {[0, 1, 2].map((i) => (
+        <motion.circle
+          key={i}
+          cx={58 + i * 9}
+          cy={50 - i * 8}
+          r={3 - i * 0.6}
+          fill="currentColor"
+          initial={reduce ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 0.45, y: 0 }}
+          transition={{ delay: reduce ? 0 : 0.5 + i * 0.15 }}
+        />
+      ))}
+    </svg>
+  );
+}
+
+/** Filled hearts for the ones kept, outlines for the lost ones (shape + color). */
+function HeartRow({ value, max }: { value: number; max: number }) {
+  return (
+    <span className="flex items-center justify-center gap-0.5" role="img" aria-label={`${value} de ${max} corazones`}>
+      {Array.from({ length: max }, (_, i) => (
+        <Heart
+          key={i}
+          size={20}
+          strokeWidth={2.2}
+          className={i < value ? "fill-[#c2414b] text-[#c2414b]" : "text-muted opacity-60"}
+        />
+      ))}
+    </span>
+  );
+}
+
+/** A candle that just went out: a stub, a wick and a curl of smoke. */
+function SpentCandle({ reduce }: { reduce: boolean }) {
+  return (
+    <svg width="72" height="96" viewBox="0 0 72 96" className="text-muted">
+      <motion.path
+        d="M36 40c-6-6 6-10 0-16s6-10 0-16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        initial={reduce ? false : { pathLength: 0, opacity: 0 }}
+        animate={{ pathLength: 1, opacity: 0.55 }}
+        transition={{ duration: 1.6, ease: "easeOut" }}
+      />
+      <line x1="36" y1="44" x2="36" y2="52" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+      <rect x="24" y="52" width="24" height="34" rx="4" fill="currentColor" opacity="0.35" />
+      <rect x="14" y="86" width="44" height="6" rx="3" fill="currentColor" opacity="0.5" />
+    </svg>
   );
 }
 
@@ -190,80 +276,56 @@ function Reason({ ok, text, bonus = false }: { ok: boolean; text: string; bonus?
   );
 }
 
-function Stat({ label, value, max, onChange, star = false }: { label: string; value: number; max: number; onChange?: (v: number) => void; star?: boolean }) {
+function Stat({
+  label,
+  value,
+  max,
+  min = 0,
+  onChange,
+  suffix,
+  render,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  min?: number;
+  onChange?: (v: number) => void;
+  suffix?: string;
+  render?: (v: number) => React.ReactNode;
+}) {
   return (
-    <div className="px-2 py-4">
-      <p className="text-xs uppercase tracking-widest text-muted">{label}</p>
-      <div className="mt-1 flex items-center justify-center gap-1">
-        {onChange && (
+    <div className="px-1 py-4">
+      <p className="text-[11px] uppercase tracking-widest text-muted">{label}</p>
+      <div className="mt-1 flex min-h-11 items-center justify-center" aria-live="polite">
+        {render ? (
+          render(value)
+        ) : (
+          <p className="font-display text-3xl tabular-nums">
+            {value}
+            {suffix && <span className="text-lg text-muted"> {suffix}</span>}
+          </p>
+        )}
+      </div>
+      {onChange && (
+        <div className="mt-1 flex justify-center gap-2">
           <button
             aria-label={`Menos ${label.toLowerCase()}`}
-            onClick={() => onChange(Math.max(0, value - 1))}
-            className="flex h-11 w-11 items-center justify-center rounded-full border border-border hover:bg-border/40"
+            disabled={value <= min}
+            onClick={() => onChange(Math.max(min, value - 1))}
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-border hover:bg-border/40 disabled:opacity-35"
           >
             <Minus size={16} />
           </button>
-        )}
-        <p className="min-w-[4.5rem] font-display text-3xl tabular-nums" aria-live="polite">
-          {value}
-          {star && <span className="text-lg text-muted"> / {max}</span>}
-        </p>
-        {onChange && (
           <button
             aria-label={`Más ${label.toLowerCase()}`}
+            disabled={value >= max}
             onClick={() => onChange(Math.min(max, value + 1))}
-            className="flex h-11 w-11 items-center justify-center rounded-full border border-border hover:bg-border/40"
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-border hover:bg-border/40 disabled:opacity-35"
           >
             <Plus size={16} />
           </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function DuoSummary({ rounds, seed, timed }: { rounds: RoundRecord[]; seed: string; timed: boolean }) {
-  const ratingSum = rounds.reduce((s, r) => s + r.rating, 0);
-  const pits = rounds.reduce((s, r) => s + r.pits, 0);
-  const stars = rounds.reduce((s, r) => s + r.stars, 0);
-  const time = timed && rounds.every((r) => r.timeMs !== null) ? rounds.reduce((s, r) => s + (r.timeMs ?? 0), 0) : null;
-  return (
-    <Card className="mt-5">
-      <h2 className="font-display text-2xl">Resumen del dúo</h2>
-      <p className="mt-1 text-sm italic text-muted">{duoPhrase({ seed, ratingSum, pits })}</p>
-      <ol className="mt-4 divide-y divide-border">
-        {rounds.map((r) => {
-          const RoleIcon = r.role === "explorer" ? Compass : MapIcon;
-          return (
-            <li key={r.round} className="flex items-center gap-3 py-2.5 text-sm">
-              <span className="w-16 shrink-0 font-medium">Ronda {r.round + 1}</span>
-              <span className="flex min-w-0 flex-1 items-center gap-1.5 text-muted">
-                <RoleIcon size={15} className="shrink-0" />
-                <span className="truncate">
-                  {DIFFICULTIES[r.level].name} · {ROLE_NAME[r.role].toLowerCase()}
-                </span>
-              </span>
-              {r.timeMs !== null && <span className="tabular-nums">{formatTime(r.timeMs)}</span>}
-              <Stars value={r.rating} size={15} />
-            </li>
-          );
-        })}
-      </ol>
-      <div className="mt-3 grid grid-cols-3 gap-2 rounded-2xl bg-background/70 p-3 text-center">
-        <Total label="Calificación" value={`${ratingSum} / ${rounds.length * 3}`} />
-        <Total label="Estrellas" value={`${stars} / ${rounds.reduce((s, r) => s + DIFFICULTIES[r.level].stars, 0)}`} />
-        <Total label={time !== null ? "Tiempo total" : "Caídas"} value={time !== null ? formatTime(time) : String(pits)} />
-      </div>
-      {time !== null && <p className="mt-2 text-center text-xs text-muted">{pits === 1 ? "1 caída" : `${pits} caídas`} en total</p>}
-    </Card>
-  );
-}
-
-function Total({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-[10px] uppercase tracking-widest text-muted">{label}</p>
-      <p className="mt-0.5 font-display text-xl tabular-nums">{value}</p>
+        </div>
+      )}
     </div>
   );
 }

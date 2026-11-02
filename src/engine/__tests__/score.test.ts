@@ -1,39 +1,30 @@
 import { describe, expect, it } from "vitest";
 import { generateGame } from "../generate";
-import { PAR, parSeconds, rateBreakdown, rateRound, starDetour } from "../score";
+import { rateBreakdown, rateExpedition } from "../score";
 
-describe("rating", () => {
-  const game = generateGame({ seed: "SCORE2", level: "medium" });
-  const par = parSeconds(game) * 1000;
+describe("expedition rating", () => {
+  const game = generateGame({ seed: "SCORE2", level: "hard" });
 
-  it("perfect round → 3 stars", () => {
-    expect(rateRound(game, { timeMs: par, pits: 0, stars: 3 })).toBe(3);
+  it("one point per heart kept", () => {
+    expect(rateExpedition(game, { escaped: true, hearts: 3, stars: 0 })).toBe(3);
+    expect(rateExpedition(game, { escaped: true, hearts: 2, stars: 0 })).toBe(2);
+    expect(rateExpedition(game, { escaped: true, hearts: 1, stars: 2 })).toBe(1);
   });
-  it("slow and clumsy → 1 star, never 0", () => {
-    expect(rateRound(game, { timeMs: par * 3, pits: 9, stars: 0 })).toBe(1);
+  it("every star on the map adds one, up to 3", () => {
+    expect(rateExpedition(game, { escaped: true, hearts: 1, stars: 3 })).toBe(2);
+    expect(rateExpedition(game, { escaped: true, hearts: 3, stars: 3 })).toBe(3);
   });
-  it("collecting every star wins one back", () => {
-    expect(rateRound(game, { timeMs: par * 3, pits: 0, stars: 3 })).toBe(3);
-    expect(rateRound(game, { timeMs: par * 3, pits: 0, stars: 2 })).toBe(2);
+  it("losing is 0, whatever was collected", () => {
+    expect(rateExpedition(game, { escaped: false, hearts: 0, stars: 3 })).toBe(0);
+    expect(rateExpedition(game, { escaped: false, hearts: 2, stars: 3 })).toBe(0);
   });
-  it("untimed rounds aren't judged on time", () => {
-    expect(rateRound(game, { timeMs: null, pits: 0, stars: 0 })).toBe(3);
+  it("escaping with a miscounted 0 hearts still counts as 1", () => {
+    expect(rateExpedition(game, { escaped: true, hearts: 0, stars: 0 })).toBe(1);
   });
   it("the breakdown says why", () => {
-    expect(rateBreakdown(game, { timeMs: par * 2, pits: 0, stars: 1 })).toEqual({ rating: 2, onTime: false, fewPits: true, allStars: false });
-    expect(rateBreakdown(game, { timeMs: null, pits: 0, stars: 1 }).onTime).toBeNull();
+    expect(rateBreakdown(game, { escaped: true, hearts: 2, stars: 3 })).toEqual({ rating: 3, escaped: true, hearts: 2, allStars: true });
   });
-});
-
-describe("par time", () => {
-  it("is a talking pace: start + walk (route and stars) + a pause per junction", () => {
-    for (const level of ["easy", "medium", "hard"] as const) {
-      for (let i = 0; i < 20; i++) {
-        const g = generateGame({ seed: `PAR${i}`, level });
-        const raw = PAR.start + PAR.perMove * (g.stats.solutionMoves + starDetour(g)) + PAR.perDecision * g.stats.routeDecisions;
-        expect(parSeconds(g)).toBe(Math.round(raw / 5) * 5);
-        expect(starDetour(g)).toBeGreaterThan(0); // stars always sit off the route
-      }
-    }
+  it("time is not an input at all", () => {
+    expect(Object.keys(rateBreakdown(game, { escaped: true, hearts: 3, stars: 0 }))).not.toContain("onTime");
   });
 });

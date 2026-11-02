@@ -1,27 +1,59 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUp, Flag, Gamepad2, LampDesk, Star, X } from "lucide-react";
-import { DIFFICULTIES, type Dir, type Game, KEY_COLORS, type PlayEvent, type PlayState, solve, starCount } from "@/src/engine";
+import { ArrowLeftRight, EyeOff, Flame, FlipHorizontal2, Gamepad2, Ghost, Heart, Hourglass, LifeBuoy, RotateCw, Star, VenetianMask, X } from "lucide-react";
+import {
+  DIFFICULTIES,
+  type Dir,
+  type Game,
+  type CurseKind,
+  KEY_COLORS,
+  type PlayEvent,
+  type PlayState,
+  TUNING,
+  emergencyAvailable,
+  sealCount,
+  solve,
+  starCount,
+  stationEmblems,
+  takeEmergencyExit,
+} from "@/src/engine";
 import { audio, buzz } from "@/lib/audio";
-import { formatTime, useElapsed, usePrefersReducedMotion } from "@/lib/hooks";
+import { usePrefersReducedMotion } from "@/lib/hooks";
+import { type Hand, readJoystickPrefs } from "@/lib/joystick";
 import { readJSON, writeJSON } from "@/lib/storage";
 import { cn } from "@/lib/utils";
 import { ShapeGlyph } from "../guide/map-art";
+import { FullscreenButton, InstallHelp, useInstallHelp } from "../fullscreen";
 import { SoundToggle } from "../sound-toggle";
+import { Medallion } from "../trials";
+import { Button } from "../ui";
 import { ExplorerController, type HudState } from "./controller";
-import { createMessenger } from "./messages";
+import { JOY_SIZE, Joystick } from "./joystick";
+import { CURSE_NAME, createMessenger } from "./messages";
+import { CureOverlay, CurseIcon } from "./cure-overlay";
+import type { Ending } from "../screens/result";
+import { StationOverlay } from "./station-overlay";
+import { FirstHint } from "../hint";
 
 /**
- * The explorer's screen: Canvas 2.5D maze in fog + a quiet HTML HUD.
+ * The explorer's screen: Canvas 2.5D maze in fog + a quiet HTML HUD (hearts,
+ * the candle's flame, stars, keys — shapes and colors, no names, no clock).
  * Input: arrows/WASD (hold to keep walking), swipe (swipe-and-hold walks),
- * and an optional on-screen pad.
+ * and the on-screen joystick (mano izquierda/derecha).
  */
 
 export interface ExplorerOutcome {
-  timeMs: number;
+  ending: Ending;
+  hearts: number;
+  /** Hearts lost on this map (heals don't undo it). */
+  hurts: number;
   pits: number;
   stars: number;
+  /** v2: seals won (0 on v1 games). */
+  seals: number;
+  /** Informative only: time doesn't score in v2. */
+  timeMs: number;
 }
 
 const KEYMAP: Record<string, Dir> = {
@@ -30,22 +62,30 @@ const KEYMAP: Record<string, Dir> = {
   ArrowDown: 2, KeyS: 2,
   ArrowLeft: 3, KeyA: 3,
 };
-const PAD_KEY = "laberinto.dpad.v1";
+/** «Esperar» (only where La Sombra roams). */
+const WAIT_KEYS = new Set(["Space", "KeyE"]);
+/** Joystick settings: { show, hand }. */
+const JOY_KEY = "laberinto.joystick.v1";
+/** The old 4-button pad's toggle: read once as a fallback for `show`, never written again. */
+const LEGACY_PAD_KEY = "laberinto.dpad.v1";
 const SWIPE_PX = 22;
 
 export function ExplorerView({
   game,
   title,
   startedAt,
-  timed,
-  onArrived,
+  play,
+  subtitle = "Explorador · describe lo que ves",
+  onEnd,
   onQuit,
 }: {
   game: Game;
   title: string;
   startedAt: number;
-  timed: boolean;
-  onArrived: (o: ExplorerOutcome) => void;
+  /** Racha: hearts carried in and the PLAY level. */
+  play?: { hearts: number; level: number };
+  subtitle?: string;
+  onEnd: (o: ExplorerOutcome) => void;
   onQuit: () => void;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -54,27 +94,44 @@ export function ExplorerView({
   const reduce = usePrefersReducedMotion();
   const [hud, setHud] = useState<HudState | null>(null);
   const [toast, setToast] = useState<{ text: string; id: number; tone: "info" | "bad" | "good" } | null>(null);
-  const [stoppedAt, setStoppedAt] = useState<number | null>(null);
-  const [penaltyFlash, setPenaltyFlash] = useState(0);
   const [pad, setPad] = useState(false);
+  const [hand, setHand] = useState<Hand>("right");
+  const [installHelp, closeInstallHelp] = useInstallHelp();
   const [hint, setHint] = useState(true);
-  const elapsed = useElapsed(startedAt, stoppedAt);
-  const arrivedAt = useRef<number | null>(null);
-  const onArrivedRef = useRef(onArrived);
-  onArrivedRef.current = onArrived;
+  /** Station whose overlay is open, or null. */
+  const [trial, setTrial] = useState<number | null>(null);
+  const [curing, setCuring] = useState(false);
+  /** The sealed exit offered the emergency way out: ask first. */
+  const [askExit, setAskExit] = useState(false);
+  const endedAt = useRef<number | null>(null);
+  const onEndRef = useRef(onEnd);
+  onEndRef.current = onEnd;
 
-  // Pad default: on for touch screens; remembered once toggled.
+  // Joystick: on for touch screens, right hand; remembered once changed.
+  // An old «cruceta» setting only decides whether it shows (see lib/joystick.ts).
   useEffect(() => {
     const coarse = window.matchMedia("(pointer: coarse)").matches;
-    setPad(readJSON<boolean>(PAD_KEY, coarse));
+    const prefs = readJoystickPrefs(readJSON<unknown>(JOY_KEY, null), readJSON<unknown>(LEGACY_PAD_KEY, null), coarse);
+    setPad(prefs.show);
+    setHand(prefs.hand);
   }, []);
+  const savePrefs = (show: boolean, h: Hand) => writeJSON(JOY_KEY, { show, hand: h });
   const togglePad = () => {
-    setPad((p) => {
-      writeJSON(PAD_KEY, !p);
-      return !p;
-    });
+    savePrefs(!pad, hand);
+    setPad(!pad);
   };
-
+  const swapHand = () => {
+    const h: Hand = hand === "right" ? "left" : "right";
+    savePrefs(pad, h);
+    setHand(h);
+  };
+  const onJoystick = (prev: Dir | null, next: Dir | null) => {
+    if (prev !== null) ctrlRef.current?.release(prev);
+    if (next !== null) {
+      setHint(false);
+      ctrlRef.current?.press(next, true);
+    }
+  };
   useEffect(() => {
     audio.startMusic(game.theme);
     return () => audio.stopMusic();
@@ -89,48 +146,67 @@ export function ExplorerView({
   useEffect(() => {
     const canvas = canvasRef.current!;
     const wrap = wrapRef.current!;
-    const css = getComputedStyle(document.documentElement);
-    const fonts = {
-      ui: getComputedStyle(document.body).fontFamily || "system-ui, sans-serif",
-      display: css.getPropertyValue("--font-display").trim() || "Georgia, serif",
-    };
     let toastId = 0;
     const message = createMessenger(game);
     const ctrl = new ExplorerController({
       game,
       canvas,
       reducedMotion: reduce,
-      fonts,
       onHud: setHud,
       onEvent: (e: PlayEvent, s: PlayState) => {
-        if (e.type === "arrived") {
-          arrivedAt.current = Date.now();
-          setStoppedAt(arrivedAt.current);
-          buzz([40, 60, 40, 60, 120]);
+        if (e.type === "arrived" || e.type === "defeat") endedAt.current = Date.now();
+        if (e.type === "defeat" || e.type === "arrived" || e.type === "emergencyExit") {
+          setTrial(null);
+          setCuring(false);
+          setAskExit(false);
         }
-        if (e.type === "fell") {
-          setPenaltyFlash((n) => n + 1);
-          buzz(220);
+        if (e.type === "uncurse") setCuring(false);
+        if (e.type === "exitSealed" && e.emergency) {
+          ctrl.release();
+          setAskExit(true);
         }
-        if (e.type === "key" || e.type === "star") buzz(30);
-        if (e.type === "locked" || e.type === "checkpoint" || e.type === "teleported" || e.type === "swirl") buzz(18);
+        if (e.type === "station" && !e.sealed) {
+          ctrl.release();
+          setTrial(e.index);
+        }
+        if (e.type === "arrived") buzz([40, 60, 40, 60, 120]);
+        if (e.type === "key" || e.type === "star" || e.type === "lantern") buzz(30);
+        if (e.type === "locked" || e.type === "candle" || e.type === "teleported" || e.type === "swirl" || e.type === "darkness") buzz(18);
+        if (e.type === "emergencyExit") buzz([40, 60, 40]);
         const text = message(e, s);
         if (text) {
-          const tone = e.type === "fell" || e.type === "locked" ? "bad" : e.type === "key" || e.type === "star" || e.type === "arrived" ? "good" : "info";
-          setToast({ text, id: ++toastId, tone });
+          const bad =
+            e.type === "fell" || e.type === "locked" || e.type === "hurt" || e.type === "shadowTouch" || e.type === "darkness" || e.type === "defeat" || e.type === "dimmed" || e.type === "trialFail";
+          const good =
+            e.type === "key" ||
+            e.type === "star" ||
+            e.type === "arrived" ||
+            e.type === "lantern" ||
+            e.type === "candle" ||
+            e.type === "seal" ||
+            e.type === "heal" ||
+            e.type === "emergencyExit" ||
+            e.type === "shadowStunned" ||
+            (e.type === "uncurse" && e.cured);
+          setToast({ text, id: ++toastId, tone: bad ? "bad" : good ? "good" : "info" });
         }
       },
-      onArrive: (s) => {
-        const at = arrivedAt.current ?? Date.now();
-        onArrivedRef.current({ timeMs: at - startedAt, pits: s.pits, stars: starCount(s) });
+      onEnd: (s) => {
+        const at = endedAt.current ?? Date.now();
+        const ending: Ending = !s.arrived ? "lost" : s.escaped ? "escaped" : "won";
+        onEndRef.current({ ending, hearts: s.hearts, hurts: s.hurts, pits: s.pits, stars: starCount(s), seals: sealCount(s), timeMs: at - startedAt });
       },
+      play,
     });
     ctrlRef.current = ctrl;
     if (process.env.NODE_ENV !== "production") {
       // Dev-only handles for playtesting and perf checks from the console.
-      const w = window as unknown as { __explorer?: ExplorerController; __explorerSolution?: Dir[] };
+      const w = window as unknown as { __explorer?: ExplorerController; __explorerSolution?: Dir[]; __explorerRoute?: (to: number) => Dir[] };
       w.__explorer = ctrl;
+      (w as { __teleport?: (c: number) => void }).__teleport = (c) => ctrl.teleportDev(c);
       w.__explorerSolution = solve(game, game.start, game.exit).dirs;
+      // Shortest route from where the explorer stands now, with the keys in hand.
+      w.__explorerRoute = (to: number) => solve(game, ctrl.state.cell, to, ctrl.state.keys).dirs;
     }
 
     const ro = new ResizeObserver(() => {
@@ -143,11 +219,31 @@ export function ExplorerView({
       ctrl.dispose();
       ctrlRef.current = null;
     };
+    // `play` is fixed for the life of this view (the parent remounts it per map).
   }, [game, reduce, startedAt]);
+
+  // An open station, cure or question pauses the maze (the overlay has the keyboard).
+  const overlay = trial !== null || curing || askExit || installHelp;
+  useEffect(() => {
+    if (ctrlRef.current) ctrlRef.current.paused = overlay;
+  }, [overlay]);
+
+  const leaveNow = () => {
+    const ctrl = ctrlRef.current;
+    if (!ctrl) return;
+    setAskExit(false);
+    ctrl.applyTrial(takeEmergencyExit(game, ctrl.state));
+  };
 
   // Keyboard: press starts a move, holding keeps walking.
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (WAIT_KEYS.has(e.code) && !e.metaKey && !e.ctrlKey && !e.altKey && !(e.target instanceof HTMLButtonElement)) {
+        e.preventDefault();
+        if (!e.repeat) ctrlRef.current?.wait();
+        return;
+      }
       const d = KEYMAP[e.code];
       if (d === undefined || e.metaKey || e.ctrlKey || e.altKey) return;
       e.preventDefault();
@@ -213,39 +309,29 @@ export function ExplorerView({
     swipe.current = null;
   };
 
-  const penalty = hud ? hud.pits * 10_000 : 0;
-  const shownTime = elapsed + penalty;
   const maxStars = DIFFICULTIES[game.level].stars;
+  const curse = hud?.state.curse ?? null;
+  const masked = curse?.kind === "masked";
+  const mirrored = curse?.kind === "mirror";
+  const canLeave = !!hud && emergencyAvailable(game, hud.state);
+  const emblems = game.stations ? stationEmblems(game) : [];
   const doorColors = [...new Set(game.doors.map((d) => d.color))].sort();
-  const lanternLeft = hud && hud.lanternUntil > Date.now() ? Math.ceil((hud.lanternUntil - Date.now()) / 1000) : 0;
 
   return (
-    <div className="fixed inset-0 flex flex-col bg-background">
-      <header className="relative z-10 flex items-center gap-2 border-b border-border bg-card/90 px-2 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] backdrop-blur sm:px-4">
+    <main className="game-shell flex flex-col bg-background">
+      <header className="relative z-10 flex items-center gap-2 border-b border-border bg-card/90 pb-2 pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))] pt-[max(0.5rem,env(safe-area-inset-top))] backdrop-blur">
         <button onClick={onQuit} aria-label="Salir de la partida" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-border/50">
           <X size={22} />
         </button>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{title}</p>
-          <p className="truncate text-xs text-muted">Explorador · describe lo que ves</p>
+          <p className="truncate text-xs text-muted">{subtitle}</p>
         </div>
-        <div className="relative">
-          <div
-            className={cn("rounded-xl px-3 py-1.5 font-mono text-lg tabular-nums", timed ? "bg-background" : "text-sm text-muted")}
-            aria-label={timed ? `Tiempo ${formatTime(shownTime)}` : "Sin tiempo"}
-          >
-            {timed ? formatTime(shownTime) : "sin tiempo"}
-          </div>
-          {timed && penaltyFlash > 0 && (
-            <span key={penaltyFlash} className="penalty-pop pointer-events-none absolute -bottom-5 right-1 text-xs font-semibold text-accent">
-              +10 s
-            </span>
-          )}
-        </div>
+        <FullscreenButton />
         <button
           onClick={togglePad}
           aria-pressed={pad}
-          aria-label="Mostrar cruceta en pantalla"
+          aria-label="Mostrar joystick en pantalla"
           className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border", pad ? "bg-foreground text-background" : "hover:bg-border/40")}
         >
           <Gamepad2 size={20} />
@@ -255,7 +341,8 @@ export function ExplorerView({
 
       <div
         ref={wrapRef}
-        className="relative min-h-0 flex-1 touch-none select-none overflow-hidden"
+        className={cn("relative min-h-0 flex-1 touch-none select-none overflow-hidden", pad && "has-joy")}
+        style={{ "--joy": JOY_SIZE } as React.CSSProperties}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerEnd}
@@ -263,22 +350,41 @@ export function ExplorerView({
       >
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 h-full w-full"
+          // «Espejo»: the explorer's world flips; the guide's map doesn't.
+          className={cn("absolute inset-0 h-full w-full", mirrored && "-scale-x-100", !reduce && "transition-transform duration-500")}
           role="img"
-          aria-label="Tu alrededor en el laberinto. Muévete con las flechas, WASD, deslizando o con la cruceta."
+          aria-label="Tu alrededor en el laberinto. Muévete con las flechas, WASD, deslizando o con el joystick."
         />
 
         {/* Status chips */}
         {hud && (
-          <div className="pointer-events-none absolute inset-x-2 top-2 flex flex-wrap items-start gap-1.5 sm:inset-x-4 sm:top-3">
+          <div className="pointer-events-none absolute left-[max(0.5rem,env(safe-area-inset-left))] right-[max(0.5rem,env(safe-area-inset-right))] top-2 flex flex-wrap items-start gap-1.5 sm:top-3">
+            {masked ? (
+              <Chip label="Máscara: no ves tus corazones, tu vela ni tus sellos" className="bg-[#2a1840]/90">
+                <VenetianMask size={16} />
+                <span className="text-xs font-semibold">? ? ?</span>
+              </Chip>
+            ) : (
+              <>
+                <Hearts hearts={hud.hearts} />
+                <Candle light={hud.light} radius={hud.radius} reduce={reduce} />
+              </>
+            )}
+            {hud.hasShadow && !masked && <ShadowChip heat={hud.heat} reduce={reduce} />}
+            {emblems.length > 0 && !masked && (
+              <Chip label={`Sellos: ${sealCount(hud.state)} de ${emblems.length}`} className={sealCount(hud.state) === emblems.length ? "bg-[#6b4a0c]/90" : undefined}>
+                {emblems.map((em, i) => (
+                  <Medallion key={i} d={em.d} sealed={(hud.seals & (1 << i)) !== 0} size={20} className="text-white/80" />
+                ))}
+              </Chip>
+            )}
             <Chip label={`Estrellas ${hud.stars} de ${maxStars}`}>
               {Array.from({ length: maxStars }, (_, i) => (
                 <Star key={i} size={16} className={i < hud.stars ? "fill-[#f2b84b] text-[#a5700f]" : "text-white/45"} />
               ))}
             </Chip>
             {doorColors.length > 0 && (
-              <Chip label={`Llaves: ${doorColors.map((c) => `${KEY_COLORS[c].colorName} ${hud.keys & (1 << c) ? "sí" : "no"}`).join(", ")}`}>
-                <span className="text-xs text-white/75">Llaves</span>
+              <Chip label={`Llaves: tienes ${doorColors.filter((c) => hud.keys & (1 << c)).length} de ${doorColors.length}`}>
                 {doorColors.map((c) => {
                   const k = KEY_COLORS[c];
                   const has = (hud.keys & (1 << c)) !== 0;
@@ -290,27 +396,39 @@ export function ExplorerView({
                 })}
               </Chip>
             )}
-            <Chip label={hud.checkpointIndex < 0 ? "Si caes vuelves a la entrada" : "Si caes vuelves a la última bandera"}>
-              <Flag size={15} className={hud.checkpointIndex < 0 ? "text-white/60" : "text-[#7fd49b]"} />
-              <span className="text-xs">{hud.checkpointIndex < 0 ? "Entrada" : "Bandera"}</span>
-            </Chip>
-            {lanternLeft > 0 && (
-              <Chip label={`Farol encendido, ${lanternLeft} segundos`} className="bg-[#7a5a12]/85">
-                <LampDesk size={15} className="text-[#ffd166]" />
-                <LanternCountdown until={hud.lanternUntil} />
+            {hud.invert && (
+              <Chip label={hud.invert.axes === "xy" ? "Controles invertidos: todo al revés" : "Controles invertidos: izquierda y derecha"} className="bg-[#5b2fa0]/90">
+                <ArrowLeftRight size={15} />
+                <span className="text-xs font-semibold">{hud.invert.axes === "xy" ? "Todo invertido" : "Izq ↔ der"}</span>
               </Chip>
             )}
-            {hud.invert && (
-              <Chip label={`Controles invertidos ${hud.invert.left} pasos`} className="bg-[#5b2fa0]/90">
-                <ArrowLeftRight size={15} />
-                <span className="text-xs font-semibold">{hud.invert.axes === "xy" ? "Todo invertido" : "Izq ↔ der"} · {hud.invert.left}</span>
-              </Chip>
+            {/* The curse: in the same row (it wraps on phones), but tappable: it opens the cure. */}
+            {curse && !hud.lost && !hud.arrived && (
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => {
+                  ctrlRef.current?.release();
+                  setCuring(true);
+                }}
+                aria-haspopup="dialog"
+                aria-label={`Maldición de ${CURSE_NAME[curse.kind].toLowerCase()}: se pasa en ${curse.left} pasos. Abrir la cura`}
+                className="pointer-events-auto flex h-8 items-center gap-1.5 rounded-full bg-[#5b2fa0]/92 pl-1.5 pr-1 text-white shadow-md"
+              >
+                <CurseKindIcon kind={curse.kind} />
+                <span className="text-xs font-semibold">{CURSE_NAME[curse.kind]}</span>
+                <span className="flex gap-0.5" aria-hidden>
+                  {Array.from({ length: Math.min(6, Math.ceil(curse.left / 4)) }, (_, i) => (
+                    <span key={i} className="h-1.5 w-1.5 rounded-full bg-white/80" />
+                  ))}
+                </span>
+                <span className="ml-0.5 rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-semibold">Curar</span>
+              </button>
             )}
           </div>
         )}
 
         {/* Event toast */}
-        <div aria-live="polite" className="pointer-events-none absolute inset-x-0 top-24 flex justify-center px-4 sm:top-16">
+        <div aria-live="polite" className="pointer-events-none absolute inset-x-0 top-24 z-40 flex justify-center px-4 sm:top-16">
           {toast && (
             <p
               key={toast.id}
@@ -325,24 +443,159 @@ export function ExplorerView({
         </div>
 
         {hint && (
-          <p className="pointer-events-none absolute inset-x-0 top-40 mx-auto w-fit rounded-full bg-black/55 px-4 py-2 text-center text-sm text-white">
-            {pad ? "Desliza o usa la cruceta · mantén para caminar" : "Flechas o WASD · mantén para caminar"}
+          <p className={cn("pointer-events-none absolute inset-x-0 mx-auto w-fit rounded-full bg-black/55 px-4 py-2 text-center text-sm text-white", hud?.hasShadow ? "top-[14rem] sm:top-40" : "top-40")}>
+            {pad ? "Desliza o usa el joystick · mantén para caminar" : "Flechas o WASD · mantén para caminar"}
           </p>
         )}
 
-        {/* Nearby, for describing */}
-        {hud && hud.nearby.length > 0 && (
-          <div className={cn("pointer-events-none absolute bottom-3 left-2 right-2 flex sm:left-4", pad ? "justify-start pr-44" : "justify-center")}>
-            <p className="max-w-full truncate rounded-full bg-black/60 px-3.5 py-2 text-sm text-white">
-              <span className="text-white/65">Cerca: </span>
-              {hud.nearby.join(" · ")}
-            </p>
+        {hud && canLeave && !askExit && trial === null && (
+          <div className="act-bar absolute inset-x-0 flex justify-center px-4" onPointerDown={(e) => e.stopPropagation()}>
+            <button onClick={() => setAskExit(true)} className="flex h-12 items-center gap-2 rounded-full bg-[#7a1f2b]/92 px-5 font-medium text-white shadow-lg">
+              <LifeBuoy size={20} /> Salida de emergencia
+            </button>
           </div>
         )}
 
-        {pad && <DPad ctrl={ctrlRef} />}
+        {hud && hud.station >= 0 && trial === null && !hud.lost && (
+          <div className="act-bar absolute inset-x-0 flex justify-center px-4" onPointerDown={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setTrial(hud.station)}
+              className="flex h-12 items-center gap-2 rounded-full bg-[#28232e]/92 pl-2 pr-5 font-medium text-white shadow-lg"
+            >
+              <Medallion d={emblems[hud.station].d} sealed={false} size={34} className="text-white/85" />
+              Abrir la estación
+            </button>
+          </div>
+        )}
+
+        {hud?.hasShadow && !overlay && !hud.lost && !hud.arrived && (
+          <div className="absolute inset-x-3 top-[6.5rem] z-10 mx-auto max-w-md sm:top-16" onPointerDown={(e) => e.stopPropagation()}>
+            <FirstHint id="shadow-explorer" />
+          </div>
+        )}
+
+        {hud?.hasShadow && !overlay && !hud.lost && !hud.arrived && (
+          <div
+            className="absolute z-10"
+            style={{
+              [hand === "right" ? "left" : "right"]: `max(0.75rem, env(safe-area-inset-${hand === "right" ? "left" : "right"}))`,
+              // Level with the middle of the joystick when it shows; at the bottom otherwise.
+              bottom: pad ? `calc(max(0.25rem, env(safe-area-inset-bottom)) + 1rem + ${JOY_SIZE} / 2 - 1.5rem)` : "max(1rem, env(safe-area-inset-bottom))",
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <button
+              // Acts on press, not on click: with another finger already on the joystick
+              // the browser doesn't turn a second tap into a click. `click` with no
+              // pointer (detail 0: keyboard, screen reader) still works.
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                if (e.button === 0) ctrlRef.current?.wait();
+              }}
+              onClick={(e) => e.detail === 0 && ctrlRef.current?.wait()}
+              aria-label="Esperar un instante en el mismo sitio (tecla Espacio o E)"
+              className="flex h-12 min-w-12 items-center justify-center gap-2 rounded-full bg-black/55 px-4 text-sm font-medium text-white shadow-lg backdrop-blur-sm active:bg-black/75"
+            >
+              <Hourglass size={20} aria-hidden /> Esperar
+            </button>
+          </div>
+        )}
+
+        {pad && !overlay && <Joystick hand={hand} reduce={reduce} onDirection={onJoystick} onToggleHand={swapHand} />}
       </div>
-    </div>
+
+      {hud && curing && curse && (
+        <CureOverlay
+          game={game}
+          curse={curse}
+          state={hud.state}
+          reduce={reduce}
+          onResult={(r) => ctrlRef.current?.applyTrial(r)}
+          onClose={() => setCuring(false)}
+        />
+      )}
+
+      {hud && askExit && (
+        <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/45 p-4 sm:items-center" onPointerDown={(e) => e.stopPropagation()}>
+          <div role="dialog" aria-modal="true" aria-labelledby="exit-title" className="w-full max-w-sm rounded-3xl bg-card p-6 shadow-2xl">
+            <h2 id="exit-title" className="flex items-center gap-2 font-display text-2xl">
+              <LifeBuoy size={24} className="shrink-0" /> ¿Salida de emergencia?
+            </h2>
+            <p className="mt-2 text-sm">
+              La salida sigue sellada, pero hay una rendija. Salen con {sealCount(hud.state) === 1 ? "1 sello" : `${sealCount(hud.state)} sellos`} de {emblems.length}.
+            </p>
+            <p className="mt-2 text-sm text-muted">
+              {play
+                ? `La racha sigue, con ${TUNING.streak.heartsAfterEscape === 1 ? "1 corazón" : `${TUNING.streak.heartsAfterEscape} corazones`}, y el próximo mapa se pone más bravo.`
+                : "Cuenta como escape, pero sin estrellas de calificación."}
+            </p>
+            <div className="mt-6 grid grid-cols-2 gap-3">
+              <Button variant="secondary" onClick={() => setAskExit(false)} autoFocus>
+                Seguir buscando
+              </Button>
+              <Button onClick={leaveNow}>Salir por aquí</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {installHelp && <InstallHelp onClose={closeInstallHelp} />}
+
+      {hud && trial !== null && game.stations && (
+        <StationOverlay
+          game={game}
+          station={game.stations[trial]}
+          state={hud.state}
+          reduce={reduce}
+          onResult={(r) => ctrlRef.current?.applyTrial(r)}
+          onClose={() => setTrial(null)}
+        />
+      )}
+    </main>
+  );
+}
+
+const CURSE_ICONS: Record<CurseKind, typeof RotateCw> = {
+  turn: RotateCw,
+  blind: EyeOff,
+  hungry: Flame,
+  masked: VenetianMask,
+  mirror: FlipHorizontal2,
+};
+
+function CurseKindIcon({ kind }: { kind: CurseKind }) {
+  const Icon = CURSE_ICONS[kind];
+  return (
+    <span className="relative flex h-6 w-6 items-center justify-center" aria-hidden>
+      <CurseIcon size={22} />
+      <Icon size={11} className="absolute -bottom-0.5 -right-0.5 rounded-full bg-[#5b2fa0]" />
+    </span>
+  );
+}
+
+const HEAT_WORDS = ["no se oye nada", "se oye lejos", "se oye cerca", "se oye muy cerca"];
+
+/**
+ * La Sombra's presence as a pulse, never as a position or a name: three dots
+ * fill as it gets near and the icon beats faster (CSS, off with reduced
+ * motion — the dots still say it). Silent for people without sound.
+ */
+function ShadowChip({ heat, reduce }: { heat: number; reduce: boolean }) {
+  const level = heat <= 0 ? 0 : heat < 0.34 ? 1 : heat < 0.67 ? 2 : 3;
+  return (
+    <Chip label={`La Sombra: ${HEAT_WORDS[level]}`} className={level === 3 ? "bg-[#2a1840]/92" : level > 0 ? "bg-[#1a1228]/85" : undefined}>
+      <Ghost
+        size={16}
+        aria-hidden
+        className={cn(level > 0 ? "text-[#d9ccff]" : "text-white/45", !reduce && level > 0 && "shadow-beat")}
+        style={!reduce && level > 0 ? { animationDuration: `${Math.round(1300 - 870 * heat)}ms` } : undefined}
+      />
+      <span className="flex gap-0.5" aria-hidden>
+        {[1, 2, 3].map((r) => (
+          <span key={r} className={cn("h-1.5 w-1.5 rounded-full", r <= level ? "bg-[#c5b6ff]" : "bg-white/25")} />
+        ))}
+      </span>
+    </Chip>
   );
 }
 
@@ -356,43 +609,44 @@ function Chip({ label, className, children }: { label: string; className?: strin
   );
 }
 
-function LanternCountdown({ until }: { until: number }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 250);
-    return () => window.clearInterval(id);
-  }, []);
-  return <span className="text-xs tabular-nums">{Math.max(0, Math.ceil((until - now) / 1000))} s</span>;
-}
-
-function DPad({ ctrl }: { ctrl: React.RefObject<ExplorerController | null> }) {
-  const btn = (dir: Dir, label: string, icon: React.ReactNode, pos: string) => (
-    <button
-      aria-label={label}
-      className={cn("absolute flex h-14 w-14 items-center justify-center rounded-2xl bg-black/45 text-white shadow-md backdrop-blur-sm active:bg-black/70", pos)}
-      onPointerDown={(e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-        ctrl.current?.press(dir, true);
-      }}
-      onPointerUp={(e) => {
-        e.stopPropagation();
-        ctrl.current?.release(dir);
-      }}
-      onPointerCancel={() => ctrl.current?.release(dir)}
-      onContextMenu={(e) => e.preventDefault()}
-    >
-      {icon}
-    </button>
-  );
+/** Shared hearts: full ones filled red, lost ones as outlines (shape + fill, not color alone). */
+function Hearts({ hearts }: { hearts: number }) {
   return (
-    <div className="absolute bottom-3 right-3 h-[10.5rem] w-[10.5rem]" onPointerDown={(e) => e.stopPropagation()}>
-      {btn(0, "Arriba", <ArrowUp size={24} />, "left-[3.5rem] top-0")}
-      {btn(3, "Izquierda", <ArrowLeft size={24} />, "left-0 top-[3.5rem]")}
-      {btn(1, "Derecha", <ArrowRight size={24} />, "right-0 top-[3.5rem]")}
-      {btn(2, "Abajo", <ArrowDown size={24} />, "bottom-0 left-[3.5rem]")}
-    </div>
+    <Chip label={`Corazones: ${hearts} de ${TUNING.hearts}`} className={hearts <= 1 ? "bg-[#7a1f2b]/85" : undefined}>
+      {Array.from({ length: TUNING.hearts }, (_, i) => (
+        <Heart
+          key={`${i}-${i < hearts}`}
+          size={16}
+          className={cn(i < hearts ? "fill-[#ef5466] text-[#ffd0d6]" : "text-white/45", i === hearts && "heart-lost")}
+        />
+      ))}
+    </Chip>
   );
 }
 
+const CANDLE_WORDS = ["apagada", "casi apagada", "a media luz", "encendida"];
+
+/**
+ * The candle as a flame that shrinks and dims: deliberately no number or
+ * countdown (GAME_SPEC_V2.md §3). Screen readers get a word for the level.
+ */
+function Candle({ light, radius, reduce }: { light: number; radius: number; reduce: boolean }) {
+  const out = light <= 0;
+  const h = 4 + 9 * Math.sqrt(light);
+  const flame = light > 0.5 ? "#ffd166" : light > 0.25 ? "#ffb43d" : "#ff8a3d";
+  return (
+    <Chip label={`Vela ${CANDLE_WORDS[Math.max(0, Math.min(3, radius))]}`} className={out ? "bg-[#1a1720]/90" : light <= 0.25 ? "bg-[#5a3a12]/85" : undefined}>
+      <svg width={18} height={22} viewBox="0 0 18 22" aria-hidden className={cn(!reduce && light > 0 && light <= 0.25 && "candle-gutter")}>
+        <rect x={6} y={13} width={6} height={8} rx={1.5} fill={out ? "#8f8794" : "#f6ead2"} />
+        <line x1={9} y1={13} x2={9} y2={11} stroke="#2b2520" strokeWidth={1.2} strokeLinecap="round" />
+        {!out && <path d={`M9 ${11.5 - h} C ${9 - h * 0.45} ${11 - h * 0.45}, ${9 - h * 0.3} 11.5, 9 11.5 C ${9 + h * 0.3} 11.5, ${9 + h * 0.45} ${11 - h * 0.45}, 9 ${11.5 - h} Z`} fill={flame} />}
+        {out && <path d="M9 9 q 2 -2 0 -4 q -2 -2 0 -4" stroke="#8f8794" strokeWidth={1.1} fill="none" strokeLinecap="round" />}
+      </svg>
+      <span className="flex gap-0.5" aria-hidden>
+        {[1, 2, 3].map((r) => (
+          <span key={r} className={cn("h-1.5 w-1.5 rounded-full", r <= radius ? "bg-[#ffd166]" : "bg-white/25")} />
+        ))}
+      </span>
+    </Chip>
+  );
+}

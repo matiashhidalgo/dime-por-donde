@@ -7,9 +7,10 @@
   --background: #f7f1e8;
   --foreground: #2b2730;
   --muted: #6f6776;
-  --accent: #d9634c;
+  /* Darkened a notch from #d9634c / #2a8a80 so white text on the accent and accent text on the cards pass WCAG AA (4.5:1). */
+  --accent: #c4503a;
   --accent-ink: #ffffff;
-  --accent-2: #2a8a80;
+  --accent-2: #217a71;
   --card: #fffaf2;
   --border: #e6dac8;
   --glow-a: rgba(246, 165, 122, 0.35);
@@ -45,12 +46,52 @@ html {
   scroll-behavior: smooth;
 }
 
+html,
+body {
+  /* Phones: no pull-to-refresh or rubber-band while playing. */
+  overscroll-behavior: none;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   overflow-x: hidden;
+  /* No double-tap zoom (pinch zoom stays available). */
+  touch-action: manipulation;
+}
+
+/* The playing screens (explorer and guide): the dynamic viewport (browser bars
+   that come and go), no selection and no long-press menu on the controls. */
+.game-shell {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100vh; /* fallback */
+  height: 100dvh;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.game-shell input,
+.game-shell textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* The centered action buttons of the explorer ride above the joystick in portrait,
+   where the stick, «Esperar» and they would otherwise collide on a narrow screen. */
+.act-bar {
+  bottom: max(1rem, env(safe-area-inset-bottom));
+}
+@media (orientation: portrait) {
+  .has-joy .act-bar {
+    /* inset + zone padding (2rem) + stick + hand button (2.75rem + gap) + air */
+    bottom: calc(max(0.25rem, env(safe-area-inset-bottom)) + 2rem + var(--joy) + 3rem + 0.5rem);
+  }
 }
 
 /* Soft sunset glow behind the menus. */
@@ -72,20 +113,53 @@ body {
   }
 }
 
-/* Explorer HUD: event toasts and the "+10 s" penalty pop. */
+/* Explorer HUD: event toasts, a heart breaking, the candle guttering. */
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(-6px) scale(0.97); }
   to { opacity: 1; transform: none; }
 }
-@keyframes penalty-pop {
-  0% { opacity: 0; transform: translateY(-4px); }
-  15% { opacity: 1; transform: none; }
-  80% { opacity: 1; }
-  100% { opacity: 0; transform: translateY(4px); }
+@keyframes heart-lost {
+  0% { transform: scale(1.6); opacity: 1; }
+  30% { transform: scale(0.8) rotate(-12deg); }
+  60% { transform: scale(1.1) rotate(8deg); }
+  100% { transform: none; }
 }
+@keyframes candle-gutter {
+  0%, 100% { opacity: 1; }
+  40% { opacity: 0.55; }
+  55% { opacity: 0.9; }
+  70% { opacity: 0.45; }
+}
+@keyframes shadow-beat {
+  0%, 100% { transform: scale(1); opacity: 0.75; }
+  18% { transform: scale(1.3); opacity: 1; }
+  36% { transform: scale(0.95); }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+@keyframes seal-pop {
+  0% { transform: scale(0.3) rotate(-30deg); opacity: 0; }
+  60% { transform: scale(1.15) rotate(6deg); opacity: 1; }
+  100% { transform: none; }
+}
+@keyframes seal-spark {
+  from { transform: rotate(var(--a)) translateY(0) scale(1); opacity: 1; }
+  to { transform: rotate(var(--a)) translateY(-70px) scale(0.3); opacity: 0; }
+}
+@keyframes wrong-shake {
+  0%, 100% { transform: none; }
+  20% { transform: translateX(-7px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(2px); }
+}
+.seal-pop { animation: seal-pop 520ms cubic-bezier(.2,.9,.3,1.2); }
+.seal-spark { animation: seal-spark 800ms ease-out forwards; }
+.wrong-shake { animation: wrong-shake 360ms ease-out; }
 .toast-in { animation: toast-in 180ms ease-out; }
-.penalty-pop { animation: penalty-pop 1.6s ease-out forwards; }
+.heart-lost { animation: heart-lost 700ms ease-out; }
+.candle-gutter { animation: candle-gutter 1.3s ease-in-out infinite; }
+.shadow-beat { animation: shadow-beat 1s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .toast-in { animation: none; }
-  .penalty-pop { animation-duration: 0.01s; animation-delay: 1.5s; }
+  .toast-in, .heart-lost, .candle-gutter, .shadow-beat, .seal-pop, .wrong-shake { animation: none; }
+  .seal-spark { display: none; }
 }

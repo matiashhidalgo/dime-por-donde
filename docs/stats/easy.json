@@ -1,7 +1,7 @@
 {
   "level": "easy",
   "games": 2000,
-  "msPerGame": 0.7,
+  "msPerGame": 7.1,
   "attempts": {
     "min": 0,
     "p5": 0,
@@ -11,7 +11,7 @@
     "mean": 0.1
   },
   "retryReasons": {
-    "few-pits": 192,
+    "few-pits": 194,
     "item-unreachable": 25,
     "few-checkpoints": 2,
     "route-long": 25,
@@ -19,22 +19,22 @@
     "no-portal-spot": 1
   },
   "algorithms": {
-    "mixed": 775,
-    "backtracker": 667,
-    "prim": 558
+    "mixed": 783,
+    "backtracker": 658,
+    "prim": 559
   },
   "themes": {
-    "forest": 481,
-    "ice": 534,
-    "cave": 489,
-    "desert": 496
+    "forest": 480,
+    "ice": 533,
+    "cave": 490,
+    "desert": 497
   },
   "obstacleTypes": {
     "pits": 2000,
-    "swirls": 481,
-    "ice": 464,
-    "portals": 539,
-    "doors": 516
+    "swirls": 486,
+    "ice": 444,
+    "portals": 543,
+    "doors": 527
   },
   "plainPath": {
     "min": 16,
@@ -46,11 +46,11 @@
   },
   "solutionMoves": {
     "min": 19,
-    "p5": 24,
+    "p5": 25,
     "p50": 46,
     "p95": 84,
     "max": 106,
-    "mean": 49
+    "mean": 48.9
   },
   "routeDecisions": {
     "min": 3,
@@ -58,7 +58,7 @@
     "p50": 13,
     "p95": 21,
     "max": 32,
-    "mean": 13.2
+    "mean": 13.3
   },
   "effort": {
     "min": 40,
@@ -66,7 +66,7 @@
     "p50": 73,
     "p95": 112,
     "max": 130,
-    "mean": 75.4
+    "mean": 75.5
   },
   "deadEnds": {
     "min": 6,
@@ -74,7 +74,7 @@
     "p50": 18,
     "p95": 37,
     "max": 49,
-    "mean": 20.1
+    "mean": 20.2
   },
   "junctions": {
     "min": 9,
@@ -158,10 +158,10 @@
   },
   "statesExplored": {
     "min": 92,
-    "p5": 117,
+    "p5": 118,
     "p50": 136,
     "p95": 257,
     "max": 280,
-    "mean": 149.8
+    "mean": 150.2
   }
 }

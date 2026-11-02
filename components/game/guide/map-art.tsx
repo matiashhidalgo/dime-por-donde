@@ -8,7 +8,9 @@ import {
   cellX,
   cellY,
   isOpen,
+  stationEmblems,
 } from "@/src/engine";
+import { landmarkShapes } from "../landmark-shapes";
 
 /**
  * The guide's map, cartographer style: paper, fine ink, symbols. Pure SVG in
@@ -17,6 +19,7 @@ import {
 
 export const CELL = 40;
 export const SWIRL_COLOR = "#7e4fc9";
+export const SHADOW_COLOR = "#46347f";
 export const MARK_COLOR = "#d9634c";
 export const PIN_COLOR = "#1f7f76";
 
@@ -88,10 +91,12 @@ export const Glyph = {
       <path d={`M${cx - r * 0.55},${cy + r * 0.7}h${r * 1.1}`} stroke="#6b4a00" strokeWidth={r * 0.14} strokeLinecap="round" />
     </g>
   ),
-  flag: (cx: number, cy: number, r: number, ink: string) => (
+  /** A route candle (refills the explorer's light once). */
+  candle: (cx: number, cy: number, r: number, ink: string) => (
     <g>
-      <path d={`M${cx - r * 0.45},${cy + r}V${cy - r}`} stroke={ink} strokeWidth={r * 0.13} strokeLinecap="round" />
-      <path d={`M${cx - r * 0.45},${cy - r}L${cx + r * 0.85},${cy - r * 0.55}L${cx - r * 0.45},${cy - r * 0.1}Z`} fill="#e9a23b" stroke={ink} strokeWidth={r * 0.09} strokeLinejoin="round" />
+      <circle cx={cx} cy={cy - r * 0.55} r={r * 0.75} fill="#ffb43d" fillOpacity={0.22} />
+      <rect x={cx - r * 0.28} y={cy - r * 0.2} width={r * 0.56} height={r * 1.1} rx={r * 0.12} fill="#f6ead2" stroke={ink} strokeWidth={r * 0.1} />
+      <path d={`M${cx},${cy - r * 0.3}C${cx - r * 0.35},${cy - r * 0.6} ${cx - r * 0.15},${cy - r * 0.95} ${cx},${cy - r * 1.15}C${cx + r * 0.15},${cy - r * 0.95} ${cx + r * 0.35},${cy - r * 0.6} ${cx},${cy - r * 0.3}Z`} fill="#ffb43d" stroke={ink} strokeWidth={r * 0.07} />
     </g>
   ),
   swirl: (cx: number, cy: number, r: number, both: boolean) => (
@@ -126,15 +131,84 @@ export const Glyph = {
       </g>
     );
   },
-  landmark: (cx: number, cy: number, r: number, ink: string) => (
+  /** A station: this game's emblem in a medallion (same path on both screens). */
+  station: (cx: number, cy: number, r: number, d: string, ink: string, paper: string) => (
     <g>
-      <path d={`M${cx},${cy - r}L${cx + r},${cy}L${cx},${cy + r}L${cx - r},${cy}Z`} fill="none" stroke={ink} strokeWidth={r * 0.18} strokeOpacity={0.75} />
-      <circle cx={cx} cy={cy} r={r * 0.25} fill={ink} fillOpacity={0.75} />
+      <circle cx={cx} cy={cy} r={r * 1.15} fill="#f2b84b" fillOpacity={0.25} />
+      <circle cx={cx} cy={cy} r={r} fill={paper} stroke={ink} strokeWidth={r * 0.12} strokeDasharray={`${r * 0.3} ${r * 0.16}`} />
+      <g transform={`translate(${cx} ${cy}) scale(${r * 0.7})`}>
+        <path d={d} fill={ink} />
+      </g>
+    </g>
+  ),
+  /** This game's generated silhouette (same path the explorer's canvas draws). */
+  landmark: (cx: number, cy: number, r: number, d: string, ink: string, paper: string) => (
+    <g transform={`translate(${cx} ${cy}) scale(${r})`}>
+      <path d={d} fill={ink} fillOpacity={0.82} stroke={paper} strokeWidth={0.08} strokeLinejoin="round" />
     </g>
   ),
 };
 
-function MapArtInner({ game, showLabels }: { game: Game; showLabels: boolean }) {
+/**
+ * La Sombra's ROUND, never its position: a stroke along the corridors with
+ * arrowheads (one way for a loop, both ways for a there-and-back) and a dot
+ * every 4 cells to count with. Where it is right now, the pair works out by
+ * talking. No name on the map.
+ */
+export function ShadowRoute({ game, cell = CELL, paper }: { game: Game; cell?: number; paper: string }) {
+  const sh = game.shadow;
+  if (!sh) return null;
+  const g = game.grid;
+  const pts = sh.route.map((c) => [cellX(g, c) * cell + cell / 2, cellY(g, c) * cell + cell / 2] as const);
+  const closed = sh.shape === "loop";
+  const d = `M${pts.map((p) => p.join(",")).join("L")}${closed ? "Z" : ""}`;
+  const arrow = (x: number, y: number, dx: number, dy: number, key: string) => {
+    const s = cell * 0.17;
+    const px = -dy;
+    const py = dx;
+    return (
+      <polygon
+        key={key}
+        points={`${x + dx * s},${y + dy * s} ${x - dx * s * 0.6 + px * s * 0.9},${y - dy * s * 0.6 + py * s * 0.9} ${x - dx * s * 0.6 - px * s * 0.9},${y - dy * s * 0.6 - py * s * 0.9}`}
+        fill={SHADOW_COLOR}
+        stroke={paper}
+        strokeWidth={1}
+        strokeLinejoin="round"
+      />
+    );
+  };
+  const n = pts.length;
+  const marks: React.ReactNode[] = [];
+  const segs = closed ? n : n - 1;
+  for (let i = 0; i < segs; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % n];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    const dx = (b[0] - a[0]) / len;
+    const dy = (b[1] - a[1]) / len;
+    if (i % 4 === 2 || (segs < 4 && i === 0)) {
+      const mx = (a[0] + b[0]) / 2;
+      const my = (a[1] + b[1]) / 2;
+      if (closed) marks.push(arrow(mx, my, dx, dy, `a${i}`));
+      else {
+        const o = cell * 0.13;
+        marks.push(arrow(mx - dy * o, my + dx * o, dx, dy, `f${i}`), arrow(mx + dy * o, my - dx * o, -dx, -dy, `b${i}`));
+      }
+    }
+  }
+  return (
+    <g aria-hidden>
+      <path d={d} fill="none" stroke={paper} strokeWidth={cell * 0.22} strokeOpacity={0.75} strokeLinecap="round" strokeLinejoin="round" />
+      <path d={d} fill="none" stroke={SHADOW_COLOR} strokeWidth={cell * 0.08} strokeOpacity={0.85} strokeLinecap="round" strokeLinejoin="round" />
+      {marks}
+      {pts.map((p, i) =>
+        i % 4 === 0 ? <circle key={`d${i}`} cx={p[0]} cy={p[1]} r={i === 0 ? cell * 0.13 : cell * 0.09} fill={SHADOW_COLOR} stroke={paper} strokeWidth={1.2} /> : null,
+      )}
+    </g>
+  );
+}
+
+function MapArtInner({ game }: { game: Game }) {
   const g = game.grid;
   const pal = THEMES[game.theme].palette;
   const ink = pal.ink;
@@ -199,10 +273,19 @@ function MapArtInner({ game, showLabels }: { game: Game; showLabels: boolean }) 
       <path d={walls.join("")} stroke={ink} strokeWidth={3.4} strokeLinecap="round" fill="none" />
       <rect x={0} y={0} width={W} height={H} fill="none" stroke={ink} strokeWidth={5} rx={2} />
 
+      {/* La Sombra's round (v2): the route only, never where it is */}
+      <ShadowRoute game={game} paper={pal.paper} />
+
       {/* Landmarks */}
-      {game.landmarks.map((l, i) => (
-        <g key={`lm${i}`}>{Glyph.landmark(cx(l.cell), cy(l.cell), CELL * 0.17, ink)}</g>
+      {landmarkShapes(game).map((shape, i) => (
+        <g key={`lm${i}`}>{Glyph.landmark(cx(game.landmarks[i].cell), cy(game.landmarks[i].cell), CELL * 0.4, shape.d, ink, pal.paper)}</g>
       ))}
+
+      {/* Stations (v2) */}
+      {game.stations &&
+        stationEmblems(game).map((e, i) => (
+          <g key={`st${i}`}>{Glyph.station(cx(game.stations![i].cell), cy(game.stations![i].cell), CELL * 0.42, e.d, ink, pal.paper)}</g>
+        ))}
 
       {/* Things */}
       {occ.map((o, c) => {
@@ -222,10 +305,14 @@ function MapArtInner({ game, showLabels }: { game: Game; showLabels: boolean }) 
               <g key={c}>
                 <path d={`M${x - R * 1.1},${y + R * 1.2}V${y - R * 0.3}A${R * 1.1},${R * 1.1} 0 0 1 ${x + R * 1.1},${y - R * 0.3}V${y + R * 1.2}Z`} fill={ink} />
                 <text x={x} y={y + 7} textAnchor="middle" fontSize={14} fontWeight={700} fill={pal.paper}>S</text>
+                {/* v2: three sockets over the door, one per seal */}
+                {game.stations?.map((_, i) => (
+                  <circle key={i} cx={x + (i - 1) * R * 0.75} cy={y - R * 1.15} r={R * 0.28} fill={pal.paper} stroke={ink} strokeWidth={1.2} />
+                ))}
               </g>
             );
           case "checkpoint":
-            return <g key={c}>{Glyph.flag(x, y, R * 1.1, ink)}</g>;
+            return <g key={c}>{Glyph.candle(x, y + R * 0.3, R * 1.1, ink)}</g>;
           case "pit":
             return <g key={c}>{Glyph.pit(x, y, R, ink)}</g>;
           case "door": {
@@ -256,23 +343,6 @@ function MapArtInner({ game, showLabels }: { game: Game; showLabels: boolean }) 
         }
       })}
 
-      {/* Landmark names, only when zoomed in enough to read them */}
-      {showLabels && (
-        <g fontFamily="var(--font-display)" fontStyle="italic" fontSize={9.5} textAnchor="middle" fill={ink}>
-          {game.landmarks.map((l, i) => (
-            <text
-              key={`lt${i}`}
-              x={cx(l.cell)}
-              y={cy(l.cell) + CELL * 0.42}
-              stroke={pal.paper}
-              strokeWidth={3}
-              paintOrder="stroke"
-            >
-              {l.label}
-            </text>
-          ))}
-        </g>
-      )}
     </g>
   );
 }
