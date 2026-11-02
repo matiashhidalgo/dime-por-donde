@@ -485,7 +485,14 @@ export function ExplorerView({
             onPointerDown={(e) => e.stopPropagation()}
           >
             <button
-              onClick={() => ctrlRef.current?.wait()}
+              // Acts on press, not on click: with another finger already on the joystick
+              // the browser doesn't turn a second tap into a click. `click` with no
+              // pointer (detail 0: keyboard, screen reader) still works.
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                if (e.button === 0) ctrlRef.current?.wait();
+              }}
+              onClick={(e) => e.detail === 0 && ctrlRef.current?.wait()}
               aria-label="Esperar un instante en el mismo sitio (tecla Espacio o E)"
               className="flex h-12 min-w-12 items-center justify-center gap-2 rounded-full bg-black/55 px-4 text-sm font-medium text-white shadow-lg backdrop-blur-sm active:bg-black/75"
             >

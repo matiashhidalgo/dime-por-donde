@@ -111,7 +111,7 @@ export function StationsBar({
         onClick={onToggle}
         aria-expanded={open}
         aria-label={`Estaciones: ${won} de ${emblems.length} sellos marcados. ${open ? "Plegar" : "Desplegar"}`}
-        className="flex min-h-9 items-center gap-1 rounded-full px-2 text-[10px] font-semibold uppercase tracking-widest text-muted hover:bg-border/50"
+        className="flex min-h-11 items-center gap-1 rounded-full px-2 text-[10px] font-semibold uppercase tracking-widest text-muted hover:bg-border/50"
       >
         Estaciones <span className="tabular-nums normal-case">{won}/{emblems.length}</span>
         <ChevronDown size={14} className={cn("transition-transform", open && "rotate-180")} aria-hidden />

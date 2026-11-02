@@ -33,6 +33,8 @@ export const metadata: Metadata = {
   // «default» keeps the status bar legible on the light paper (black-translucent would put white text over it).
   appleWebApp: { capable: true, title: SITE.name, statusBarStyle: "default" },
   formatDetection: { telephone: false },
+  // Next only writes the standard `mobile-web-app-capable`; older iOS wants the prefixed one too.
+  other: { "apple-mobile-web-app-capable": "yes" },
 };
 
 export const viewport: Viewport = {

@@ -405,7 +405,7 @@ export function GuideView({
       </header>
 
       {/* The notch and the home bar stay outside the map (landscape too). */}
-      <div className="relative flex min-h-0 flex-1 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+      <div className="relative flex min-h-0 flex-1 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
         {/* Map */}
         <div
           ref={boxRef}
@@ -566,7 +566,7 @@ export function GuideView({
       </div>
 
       {/* Toolbar */}
-      <footer className="flex items-center gap-1.5 border-t border-border bg-card/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:gap-2 sm:px-4">
+      <footer className="flex items-center gap-1.5 border-t border-border bg-card/95 pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))] pt-2 sm:gap-2">
         <div role="radiogroup" aria-label="Herramienta" className="flex gap-0.5 sm:gap-1">
           {TOOLS.map((t) => (
             <button

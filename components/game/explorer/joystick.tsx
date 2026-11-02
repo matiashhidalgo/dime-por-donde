@@ -27,6 +27,14 @@ export const JOY_SIZE = "clamp(7.5rem, 34vmin, 10.5rem)";
 /** The touch zone's extra margin around the base. */
 const ZONE_PAD = "1rem";
 
+/** The rim arc that lights up with a direction (±36° around it, viewBox 100): visible even under the knob. */
+function rimArc(dir: Dir): string {
+  const mid = (dir * 90 - 90) * (Math.PI / 180);
+  const half = (36 * Math.PI) / 180;
+  const pt = (a: number) => `${(50 + 46.5 * Math.cos(a)).toFixed(2)} ${(50 + 46.5 * Math.sin(a)).toFixed(2)}`;
+  return `M ${pt(mid - half)} A 46.5 46.5 0 0 1 ${pt(mid + half)}`;
+}
+
 /** Where each arrow sits on the ring (viewBox 100, base radius 50). */
 const ARROWS: { dir: Dir; d: string }[] = [
   { dir: 0, d: "M41 20 L50 11 L59 20" },
@@ -141,7 +149,7 @@ export function Joystick({ hand, reduce, onDirection, onToggleHand }: Props) {
 
   const side = hand === "left" ? "left" : "right";
   const inset = `max(0.25rem, env(safe-area-inset-${side}))`;
-  const lit = "color-mix(in srgb, var(--accent) 60%, #fff)";
+  const lit = "color-mix(in srgb, var(--accent) 45%, #fff)";
 
   return (
     <div
@@ -195,6 +203,17 @@ export function Joystick({ hand, reduce, onDirection, onToggleHand }: Props) {
           <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full" aria-hidden>
             {ARROWS.map((a) => (
               <path
+                key={`arc${a.dir}`}
+                d={rimArc(a.dir)}
+                fill="none"
+                stroke={lit}
+                strokeWidth="3.2"
+                strokeLinecap="round"
+                style={{ opacity: active === a.dir ? 0.95 : 0, transition: reduce ? "none" : "opacity 110ms ease-out", filter: "drop-shadow(0 0 3px var(--accent))" }}
+              />
+            ))}
+            {ARROWS.map((a) => (
+              <path
                 key={a.dir}
                 d={a.d}
                 data-lit={active === a.dir}
@@ -214,8 +233,8 @@ export function Joystick({ hand, reduce, onDirection, onToggleHand }: Props) {
               data-testid="joystick-knob"
               className="relative rounded-full"
               style={{
-                width: "42%",
-                height: "42%",
+                width: "40%",
+                height: "40%",
                 transform: touching ? "scale(1.1)" : "scale(1)",
                 transition: reduce ? "none" : "transform 140ms ease-out",
                 background: "radial-gradient(circle at 36% 28%, #fffaf0 0%, #f4dcc0 36%, #cf9e7e 100%)",
@@ -230,7 +249,7 @@ export function Joystick({ hand, reduce, onDirection, onToggleHand }: Props) {
                 style={{
                   opacity: active !== null ? 1 : 0,
                   transition: reduce ? "none" : "opacity 110ms ease-out",
-                  boxShadow: "0 0 0 2.5px var(--accent), 0 0 16px 2px var(--accent)",
+                  boxShadow: "0 0 0 2px color-mix(in srgb, var(--accent) 45%, #fff), 0 0 14px 2px color-mix(in srgb, var(--accent) 70%, transparent)",
                 }}
               />
             </div>

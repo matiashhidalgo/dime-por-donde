@@ -21,7 +21,7 @@ export const JOYSTICK = {
   /** To change axis the new axis must beat the current one by this factor. */
   axisSwitch: 1.4,
   /** How far the knob may travel from the center, as a share of the base radius. */
-  travel: 0.54,
+  travel: 0.48,
 } as const;
 
 /**
