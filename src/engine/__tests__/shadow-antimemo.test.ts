@@ -56,11 +56,14 @@ describe("LA SOMBRA, 5,000 draws", () => {
     expect(gaveUp).toBeLessThan(0.005);
   }, 600_000);
 
-  it("(d) fairness: the audit passes in 100 % of them (retries counted), always within the ratio", () => {
+  it("(d) fairness: the audit passes in 100 % of them (retries counted), always within the ratio", async () => {
     let retried = 0;
     let worst = 0;
     let hunters = 0;
+    let audited = 0;
     for (const { game } of shadowed()) {
+      // ~80 s of audits in one go would block the worker (vitest's «Timeout calling onTaskUpdate»): yield now and then.
+      if (++audited % 25 === 0) await new Promise((r) => setImmediate(r));
       // Hunters cost ~10× more to audit: a spread sample of them, every other map in full.
       if (game.shadow!.hunter && hunters++ % 4 !== 0) continue;
       const a = auditShadow(game);
