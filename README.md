@@ -61,7 +61,7 @@ npm run build            # export estático en out/
 npm start                # sirve out/ como lo haría el hosting
 npm run calibrate        # parejas simuladas: % de victorias, corazones, caídas, apagones, toques de la Sombra (añade un número, "sweep" o "streak")
 npm run audit:variety    # auditoría anti-memorización de TODAS las pruebas → imprime el informe; con --write lo guarda en docs/AUDIT.md
-npm run brand            # regenera public/og.png y el ícono de iPhone
+npm run brand            # regenera public/og.png, el ícono de iPhone y los íconos del manifest (192, 512, maskable)
 ```
 
 Solo en desarrollo: `/?dev=CÓDIGO&role=explorer|guide` entra directo a jugar (con `window.__explorer`, `__teleport(celda)`, `__explorerRoute(celda)` en la consola) y `/debug/` muestra cualquier laberinto completo. El primero no existe en el build de producción.
@@ -114,6 +114,13 @@ Solo en desarrollo: `/?dev=CÓDIGO&role=explorer|guide` entra directo a jugar (c
 
 Otras perillas fuera de `tuning.ts`: memoria del explorador (`memory` en `src/engine/difficulty.ts`), volumen (`MUSIC`, `MASTER` en `lib/audio.ts`), velocidad al caminar (`WALK_MS` en `components/game/explorer/controller.ts`). La cantidad de pozos, el tamaño, las puertas… están en `difficulty.ts` pero **cambian los laberintos**: el generador v1 está congelado por un test de huellas («golden»); un cambio así se publica como una versión nueva del generador.
 
+## En el teléfono
+
+- **Joystick.** En pantallas táctiles el explorador tiene un joystick (reemplaza a la cruceta): se arrastra el pomo hacia donde quieras caminar y se **mantiene** para seguir caminando; se puede cambiar de dirección sin soltar. Zona muerta de ~25 % del radio y sectores con histéresis, para que no parpadee en diagonal. El botón **Mano derecha/izquierda** (sobre el joystick) intercambia lados con «Esperar» y se recuerda. El ícono del mando en la cabecera lo muestra u oculta (en escritorio empieza oculto). Deslizar sobre el mapa y el teclado siguen igual.
+- **Pantalla completa.** Botón «Pantalla completa» / «Salir» en la cabecera del explorador y de la guía (Android Chrome, escritorio, iPad). En **iPhone Safari** las páginas no pueden ocupar toda la pantalla: no hay botón y, **una sola vez**, una ayuda explica «Agregar a pantalla de inicio»; ya instalado (modo standalone), no se muestra nada.
+- **Instalable.** `app/manifest.ts` (`display: "fullscreen"` con respaldo a standalone, orientación libre, colores de la marca) e íconos 192/512/maskable. Nada de esto cambia reglas ni `RULES_VERSION`.
+- Maquetación: `dvh`, zonas seguras (`env(safe-area-inset-*)`) en cabecera, HUD, joystick y «Esperar», sin rebote ni selección ni menú de pulsación larga en los controles; el pellizco para hacer zoom no se bloquea (accesibilidad). Detalles y verificación: [`docs/INFORME_MOVIL.md`](docs/INFORME_MOVIL.md).
+
 ## Accesibilidad y rendimiento
 
 - Objetivos táctiles ≥ 44 px; foco visible y teclado en las pantallas y diálogos (Esc cierra; flechas/WASD; Espacio o E para esperar); `aria-label` genéricos (sin nombres de objetos); estado de la vela, los corazones y la cercanía de la Sombra legibles para lectores de pantalla.
@@ -131,7 +138,7 @@ El nombre visible es **Dime por dónde**. Se cambia en un solo lugar: `lib/site.
 src/engine/          motor puro (sin DOM, sin Math.random): códigos, generadores, reglas, pruebas, Sombra, solucionador, simulación
 components/game/     pantallas, vista del explorador (Canvas 2D) y de la guía (SVG), pistas de primera vez, recorrido «Cómo se juega»
 lib/                 audio (WebAudio), almacenamiento a prueba de fallos, historial, textos (bolsas sin repetición), pistas
-scripts/             calibración, auditoría de variedad y render de imágenes de marca
-docs/                AUDIT.md, PUBLICAR.md, INFORME_NUBE.md, PLAN_NUBE.md, capturas/
+scripts/             calibración, auditoría de variedad y render de imágenes de marca (incluye los íconos del manifest)
+docs/                AUDIT.md, PUBLICAR.md, INFORME_NUBE.md, PLAN_NUBE.md, PLAN_MOVIL.md, INFORME_MOVIL.md, capturas/, capturas-movil/
 app/                 Next.js (export estático); /debug/ visor de desarrollo
 ```

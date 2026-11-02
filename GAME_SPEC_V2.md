@@ -680,3 +680,15 @@ Con Sombra 66,5 % (objetivo ≈ 66 %); la auditoría dio por perdido el mapa en 
 - **Textos.** Bolsas de barajado (`lib/lines.ts`): una línea no vuelve hasta haber salido todas; ≥ 8 variantes por evento común (con plantillas apertura × cola donde conviene) y ≥ 12 por final (victoria, salida de emergencia, atrapados, fin de racha; en realidad 24 por situación). Los dos dispositivos de una pareja pueden leer líneas distintas del mismo final (nada depende de que coincidan); una pantalla que se redibuja conserva su línea (memoria por semilla). Tests: `variety.test.ts` (50 partidas simuladas sin repetición seguida ni línea que acapare) y `lines.test.ts`.
 - **Onboarding.** «Cómo se juega» en 4 tarjetas, saltable y recordada en `localStorage` (clave `laberinto.hints.v1`, con try/catch); botón «Cómo se juega» siempre en el inicio. Pista de una frase la **primera vez** que aparece cada tipo de prueba (figuras, cerradura, piano, tangram), la cura, La Sombra (explorador y guía) y la clave de relevo; descartable y no vuelve sola.
 - **QA.** Ver `docs/INFORME_NUBE.md` (casos borde, limpieza tras varias partidas, accesibilidad, rendimiento, capturas en `docs/capturas/`).
+
+---
+
+## Anexo de la etapa 7: interfaz para teléfono (sin cambios de reglas)
+
+Solo interfaz. **No** cambian reglas, motor ni `RULES_VERSION` (sigue en 5); el sello y los códigos son los mismos.
+
+- **Joystick** (`lib/joystick.ts` puro, `components/game/explorer/joystick.tsx`): sustituye a la cruceta de 4 botones. Salida de 4 direcciones por eje dominante; zona muerta 25 % del radio de la base (suelta al bajar de 18 %); para cambiar de eje el otro debe ganar por ×1,4 (banda de ±9,5° alrededor de la diagonal). Mantener = caminar continuo (el mismo `press(dir, true)` del deslizar). Captura de puntero con su propio `pointerId`; no deja pasar eventos al lienzo (deslizar y joystick son excluyentes). Mano izquierda/derecha en `laberinto.joystick.v1` (`{show, hand}`); el ajuste antiguo `laberinto.dpad.v1` solo decide `show` si no hay uno nuevo y cualquier valor raro se ignora. Fijo (no flotante).
+- **«Esperar»** actúa al pulsar (`pointerdown`), no al `click`: con otro dedo ya en el joystick el navegador no genera el `click` del segundo toque. La activación sin puntero (teclado, lector de pantalla) sigue por `click`.
+- **Pantalla completa** (`lib/display.ts`, `components/game/fullscreen.tsx`): Fullscreen API con prefijos y `try/catch`; en iPhone una ayuda única (`laberinto.install-help.v1`) a «Agregar a pantalla de inicio», que no sale en modo standalone.
+- **Manifest** (`app/manifest.ts`, `force-static`) con `display: "fullscreen"`, `display_override`, íconos 192/512/maskable (`npm run brand`); `viewport-fit=cover`; `mobile-web-app-capable` y `apple-mobile-web-app-capable`.
+- No se añaden nombres de objetos ni emoji: íconos de `lucide-react` y SVG propio.

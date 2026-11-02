@@ -35,7 +35,7 @@ Objetivo: saber si la tensión (corazones, vela y **La Sombra**), el sonido, la 
 - **Primeras veces.** ¿Las tarjetas de «Cómo se juega» y las pistas de una frase sobraron, faltaron o estorbaron? ¿Alguna pista tapó algo importante en el celular?
 - **Sonido en la llamada.** ¿La música tapa la voz? ¿El latido tapa la voz? ¿Hay eco (el micrófono del celular repite el sonido de la compu)? Prueben Música → Efectos → Silencio con el botón de sonido.
 - **Chistes y mensajes.** ¿Alguno se repite demasiado, molesta o no se entiende? ¿Hubo frases que sí hicieron reír (anótenlas)?
-- **Celular.** iOS Safari: ¿suena al primer toque? ¿La pantalla se mantiene encendida? Android Chrome: ¿vibra al chocar, caer, perder un corazón o con el latido muy cerca? En los dos: ¿se ve completo en vertical y en horizontal? ¿La cruceta, el deslizar y «Esperar» responden bien?
+- **Celular.** iOS Safari: ¿suena al primer toque? ¿La pantalla se mantiene encendida? Android Chrome: ¿vibra al chocar, caer, perder un corazón o con el latido muy cerca? En los dos: ¿se ve completo en vertical y en horizontal? ¿El joystick responde bien (¿se siente la zona muerta? ¿se salta de dirección en las diagonales? ¿el pulgar cae cómodo en el tamaño y el lado, y el cambio de mano sirve?), ¿«Esperar» con el otro dedo mientras se camina, el deslizar y la pantalla completa (Android) o «Agregar a pantalla de inicio» (iPhone) funcionan sin que la muesca o la barra inferior tapen nada?
 
 ## Rejugabilidad: la prueba que importa (varias sesiones)
 
