@@ -16,7 +16,7 @@ Rama `v2-sombra-cierre` (PR #1). Cambios solo de interfaz: no cambian reglas, `R
 ## Decisiones previas
 
 - **Joystick fijo, no flotante.** El flotante exige otra zona táctil en la mitad inferior que choca con el gesto de deslizar del lienzo (que es una función existente); no es simple, así que no entra.
-- **Salida de 4 direcciones.** Eje dominante; para no parpadear en diagonales, se mantiene el eje actual mientras el otro no lo supere por un margen (×1,3). La zona muerta tiene histéresis propia (entra a 25 %, suelta a 18 %).
+- **Salida de 4 direcciones.** Eje dominante; para no parpadear en diagonales, se mantiene el eje actual mientras el otro no lo supere por un margen (×1,4). La zona muerta tiene histéresis propia (entra a 25 %, suelta a 18 %).
 - **Zoom:** no se bloquea el pellizco (accesibilidad); el doble toque se evita con `touch-action: manipulation`.
 - **Barra de estado de iOS** en `default`: con `black-translucent` el reloj saldría blanco sobre papel claro.
 - **Ajuste de la cruceta antigua** (`laberinto.dpad.v1`): si no hay ajuste nuevo, su valor decide solo si el joystick se muestra; nada más. Valores raros se ignoran.
