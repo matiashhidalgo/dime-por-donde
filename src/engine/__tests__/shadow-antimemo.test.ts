@@ -24,15 +24,18 @@ interface Draw {
 let bare: Game[] = [];
 let draws: Draw[] = [];
 
-beforeAll(() => {
+beforeAll(async () => {
   bare = Array.from({ length: POOL }, (_, i) => {
     const { shadow: _s, shadowSkip: _k, ...rest } = generateGame({ seed: `am${i}`, level: "hard", version: 2 });
     return rest as Game;
   });
-  draws = Array.from({ length: DRAWS }, (_, i) => {
+  draws = [];
+  for (let i = 0; i < DRAWS; i++) {
     const pool = i % POOL;
-    return { pool, game: withShadow({ ...bare[pool], seed: `${bare[pool].seed}~d${i}` }) };
-  });
+    draws.push({ pool, game: withShadow({ ...bare[pool], seed: `${bare[pool].seed}~d${i}` }) });
+    // Yield now and then: minutes of solid CPU starve vitest's worker RPC ("Timeout calling onTaskUpdate").
+    if (i % 50 === 49) await new Promise((r) => setImmediate(r));
+  }
 }, 600_000);
 
 const shadowed = () => draws.filter((d) => d.game.shadow);
