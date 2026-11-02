@@ -46,11 +46,11 @@ Plan previo: [`PLAN_MOVIL.md`](PLAN_MOVIL.md).
 |---|---|
 | `npx tsc --noEmit` | sin errores |
 | `npx vitest run` (línea base, antes de tocar nada) | 27 archivos, **286 tests** en verde (15 min: corrió a la vez que otras cosas) |
-| `npx vitest run` (final) | 29 archivos, **312 tests** en verde (286 + 18 del joystick + 8 de `display`) en 9 min |
+| `npx vitest run` (final) | 29 archivos, **312 tests** en verde (286 + 18 del joystick + 8 de `display`), 9 min 26 s, salida 0 y sin el aviso de `onTaskUpdate` |
 | `npm run build` | OK; `/`: 130 kB, First Load JS **264 kB** (antes 260 kB) |
 | `/manifest.webmanifest` en `out/` | sí, con los 3 iconos |
 
-Aviso de vitest `Timeout calling "onTaskUpdate"`: ver sección 6.
+Aviso de vitest `Timeout calling "onTaskUpdate"`: arreglado, ver sección 6.
 
 ## 4. Verificación en navegador (Chromium headless con Playwright)
 
@@ -85,7 +85,7 @@ Capturas en [`capturas-movil/`](capturas-movil/) (comprimidas; los teléfonos es
 
 ## 6. Aviso de vitest «Timeout calling "onTaskUpdate"»
 
-Causa: pruebas de `shadow-antimemo` que bloquean el hilo del worker más de 60 s seguidos (el sorteo de 5.000 mapas en el `beforeAll` y, sobre todo, la prueba «(d) equidad», un bucle síncrono de ~80 s de auditorías). Cedí el control cada 50 sorteos en el `beforeAll` y cada 25 auditorías en la prueba (d), como en `property.ts`. Resultado: ver al final de esta sección.
+Causa: pruebas de `shadow-antimemo` que bloquean el hilo del worker más de 60 s seguidos (el sorteo de 5.000 mapas en el `beforeAll` y, sobre todo, la prueba «(d) equidad», un bucle síncrono de ~80 s de auditorías). Cedí el control cada 50 sorteos en el `beforeAll` y cada 25 auditorías en la prueba (d), como en `property.ts`. Resultado: antes de la corrección la suite completa terminaba con «1 error» (código de salida 1) aunque los 286 tests pasaban; **después, la suite completa (29 archivos, 312 tests, 9 min 26 s) termina sin aviso y con código de salida 0**, y `shadow-antimemo` corrido solo también (5 min). Queda el riesgo de que en una máquina más lenta otro archivo pesado (`generator.hard`, 9 min con 4 procesos en paralelo) vuelva a pasarse de 60 s sin ceder; hoy no ocurre.
 
 ## 7. Decisiones propias y por qué
 
